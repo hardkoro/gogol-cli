@@ -26,10 +26,11 @@ class DatabaseClient:
     PIN_BUTTON_TEXT_PROPERTY_ID = 149
     PIN_NAME = 148
 
-    def __init__(self, database_uri: str) -> None:
+    def __init__(self, database_uri: str, dry_run: bool) -> None:
         """Initialize the client."""
         self._engine = create_async_engine(database_uri, echo=True)
         self._session_maker = async_sessionmaker(self._engine)
+        self._dry_run = dry_run
 
     async def _query(self, query: str) -> list[dict]:
         """Query the database."""
@@ -38,7 +39,7 @@ class DatabaseClient:
 
         results: list[dict] = []
         for row in rows:
-            result = {}
+            result: dict[str, object] = {}
             for column, value in zip(row._fields, row):
                 if column not in result:
                     result[column] = value
@@ -112,7 +113,8 @@ class DatabaseClient:
 
         async with self._session_maker() as session:
             await session.execute(text(query))
-            await session.commit()
+            if not self._dry_run:
+                await session.commit()
 
         query = f"""
             SELECT MAX(id) AS `id`
@@ -130,7 +132,8 @@ class DatabaseClient:
 
         async with self._session_maker() as session:
             await session.execute(text(query))
-            await session.commit()
+            if not self._dry_run:
+                await session.commit()
 
         query = f"""
             SELECT MAX(id) AS `id`
@@ -153,6 +156,7 @@ class DatabaseClient:
 
         async with self._session_maker() as session:
             await session.execute(text(query))
-            await session.commit()
+            if not self._dry_run:
+                await session.commit()
 
         LOGGER.info(f"Finished pinning event {event.id}")
