@@ -113,49 +113,44 @@ class DatabaseClient:
 
         async with self._session_maker() as session:
             await session.execute(text(query))
-            if not self._dry_run:
-                await session.commit()
 
-        query = f"""
-            SELECT MAX(id) AS `id`
-            FROM b_file;
-        """
+            query = f"""
+                SELECT MAX(id) AS `id`
+                FROM b_file;
+            """
 
-        preview_picture_query = await self._query(query)
+            preview_picture_query = await self._query(query)
 
-        preview_picture = preview_picture_query[0]["id"]
+            preview_picture = preview_picture_query[0]["id"]
 
-        query = f"""
-            INSERT INTO b_iblock_element(timestamp_x, modified_by, date_create, created_by, iblock_id, active, active_from, active_to, sort, name, preview_picture, searchable_content, tmp_id)
-            VALUES ('{datetime.now(tz=None).strftime('%Y-%m-%d %H:%M:%S')}', '{self.DEFAULT_USER_ID}', '{datetime.now(tz=None).strftime('%Y-%m-%d %H:%M:%S')}', '{self.DEFAULT_USER_ID}', '{self.PIN_IBLOCK_ID}', 'Y', '{event.active_from}', '{event.active_to}', '{self.PIN_DEFAULT_SORT}', '{event.name}', {preview_picture}, '{event.name.upper()}', 0);
-        """
+            query = f"""
+                INSERT INTO b_iblock_element(timestamp_x, modified_by, date_create, created_by, iblock_id, active, active_from, active_to, sort, name, preview_picture, searchable_content, tmp_id)
+                VALUES ('{datetime.now(tz=None).strftime('%Y-%m-%d %H:%M:%S')}', '{self.DEFAULT_USER_ID}', '{datetime.now(tz=None).strftime('%Y-%m-%d %H:%M:%S')}', '{self.DEFAULT_USER_ID}', '{self.PIN_IBLOCK_ID}', 'Y', '{event.active_from}', '{event.active_to}', '{self.PIN_DEFAULT_SORT}', '{event.name}', {preview_picture}, '{event.name.upper()}', 0);
+            """
 
-        async with self._session_maker() as session:
             await session.execute(text(query))
-            if not self._dry_run:
-                await session.commit()
 
-        query = f"""
-            SELECT MAX(id) AS `id`
-            FROM b_iblock_element;
-        """
+            query = f"""
+                SELECT MAX(id) AS `id`
+                FROM b_iblock_element;
+            """
 
-        events = await self._query(query)
+            events = await self._query(query)
 
-        event_id = events[0]["id"]
+            event_id = events[0]["id"]
 
-        query = f"""
-            UPDATE b_iblock_element
-            SET xml_id = '{event_id}'
-            WHERE id = '{event_id}';
-            INSERT INTO b_iblock_element_property (iblock_property_id, iblock_element_id, value, value_type, value_num)
-            VALUES ('{self.PIN_LINK_PROPERTY_ID}', '{event_id}', '{event.url}', 'text', 0.0000),
-            ('{self.PIN_BUTTON_TEXT_PROPERTY_ID}', '{event_id}', 'Подробнее', 'text', 0.0000),
-            ('{self.PIN_NAME}', '{event_id}', '{event.name}', 'text', 0.0000);
-        """
+            query = f"""
+                UPDATE b_iblock_element
+                SET xml_id = '{event_id}'
+                WHERE id = '{event_id}';
+                INSERT INTO b_iblock_element_property (iblock_property_id, iblock_element_id, value, value_type, value_num)
+                VALUES ('{self.PIN_LINK_PROPERTY_ID}', '{event_id}', '{event.url}', 'text', 0.0000),
+                ('{self.PIN_BUTTON_TEXT_PROPERTY_ID}', '{event_id}', 'Подробнее', 'text', 0.0000),
+                ('{self.PIN_NAME}', '{event_id}', '{event.name}', 'text', 0.0000);
+            """
 
-        async with self._session_maker() as session:
             await session.execute(text(query))
+
             if not self._dry_run:
                 await session.commit()
 
