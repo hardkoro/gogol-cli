@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from gogol_pin.clients import DatabaseClient
+from gogol_pin.exporter import EmailExporter
 from gogol_pin.service import GogolService
 
 
@@ -42,4 +43,6 @@ async def export_statistics(
     pin_service = GogolService(database_client)
 
     statistics = await pin_service.export(month_number, year_suffix)
-    pin_service.pretty_print_statistics(statistics)
+
+    exporter = EmailExporter()
+    exporter.export(statistics)
