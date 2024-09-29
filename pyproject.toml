@@ -6,14 +6,19 @@ authors = ["Evgenii Korobkov <eug.korobkov@gmail.com>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = "==3.11.1"
 
-aiomysql = "^0.2.0"
-pydantic = "^2.8.0"
-python-dotenv = "^1.0.1"
-sqlalchemy = "^2.0.31"
-typer = "^0.12.3"
-uvloop = "^0.19.0"
+aiomysql = "==0.2.0"
+pydantic = "==2.9.2"
+python-dotenv = "==1.0.1"
+sqlalchemy = "==2.0.35"
+typer = "==0.12.5"
+uvloop = "==0.20.0"
+
+[tool.poetry.dev-dependencies]
+mypy = "==1.11.2"
+pylint = "==3.3.1"
+ruff = "==0.6.8"
 
 [tool.poetry.scripts]
 gogol-pin = "gogol_pin.__main__:cli"
@@ -21,3 +26,68 @@ gogol-pin = "gogol_pin.__main__:cli"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+]
+
+line-length = 99
+indent-width = 4
+
+# Assume Python 3.10
+target-version = "py310"
+
+[tool.ruff.lint]
+# Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
+select = ["E4", "E7", "E9", "F"]
+ignore = []
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+
+[tool.pylint]
+max-args = 10
+min-public-methods = 0
+
+[tool.mypy]
+# Specify the directories to include for type checking.
+exclude = ["migrations"]

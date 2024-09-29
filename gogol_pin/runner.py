@@ -1,10 +1,11 @@
 """Script run."""
 
+from datetime import datetime
 from gogol_pin.clients import DatabaseClient
 from gogol_pin.service import PinService
 
 
-async def run(
+async def pin_event(
     database_uri: str,
     event_url: str,
     dry_run: bool,
@@ -15,3 +16,17 @@ async def run(
 
     event = await pin_service.get_event(event_url)
     await pin_service.pin_event(event)
+
+
+async def copy_event(
+    database_uri: str,
+    event_url: str,
+    dry_run: bool,
+    new_event_datetime: datetime,
+) -> None:
+    """Run the script."""
+    database_client = DatabaseClient(database_uri, dry_run)
+    pin_service = PinService(database_client)
+
+    event = await pin_service.get_event(event_url)
+    await pin_service.copy_event(event, new_event_datetime)

@@ -21,17 +21,26 @@ poetry run python -m gogol_pin --help
 Run the script:
 
 ```shell
-poetry run python -m gogol_pin --event-url <event-url> --dry-run
+poetry run python -m gogol_pin pin-event <event-url> --dry-run
+```
+
+## Development
+
+To lint the project run the following command to execute the linting script:
+
+```shell
+poetry run ./lint.sh
 ```
 
 ## To-do
 
 - [x] Pin event in agenda
-- [ ] Why do we need three commits?
+- [x] Why do we need three commits?
 - [ ] Copy event on a new date
 - [ ] Export month statistics
 - [ ] Send it via email?
 - [ ] Guide the code
+- [ ] Update the chronograph (disable old, enable new)
 
 ## Problems
 
