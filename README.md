@@ -49,9 +49,9 @@ poetry run ./lint.sh
 - [x] Pin event in agenda
 - [x] Why do we need three commits?
 - [ ] Copy event on a new date
-- [ ] Export month statistics
+- [x] Export month statistics
 - [ ] Send it via email?
-- [ ] Guide the code
+- [x] Guide the code
 - [ ] Update the chronograph (disable old, enable new)
 
 ## Problems
