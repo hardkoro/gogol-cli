@@ -16,8 +16,8 @@ class AbstractExporter(ABC):
         """Export."""
 
 
-class EmailExporter(AbstractExporter):
-    """Email exporter."""
+class PlainExporter(AbstractExporter):
+    """Plain exporter."""
 
     def export(self, statistics: list[dict[str, int]]) -> None:
         """Pretty print statistics."""
