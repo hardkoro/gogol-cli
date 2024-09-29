@@ -18,10 +18,22 @@ Show help message:
 poetry run python -m gogol_pin --help
 ```
 
-Run the script:
+Pin event:
 
 ```shell
-poetry run python -m gogol_pin pin-event <event-url> --dry-run
+poetry run python -m gogol_pin pin <event-url> --dry-run
+```
+
+Copy event to the new date:
+
+```shell
+poetry run python -m gogol_pin copy <event-url> --new-event-datetime <new-event-datetime> --dry-run
+```
+
+Export monthly statistics:
+
+```shell
+poetry run python -m gogol_pin export <month-number> <year-suffix>
 ```
 
 ## Development

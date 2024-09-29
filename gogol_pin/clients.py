@@ -177,3 +177,44 @@ class DatabaseClient:
                 await session.commit()
 
         LOGGER.info("Finished copying event %s to %s", event.id, new_event_datetime)
+
+    async def export_statistics(
+        self, start_date: datetime, end_date: datetime
+    ) -> list[dict[str, int]]:
+        """Export monthly statistics."""
+        LOGGER.info("Exporting monthly statistics from %s to %s ...", start_date, end_date)
+
+        # Format the dates as strings in 'YYYY-MM-DD' format for the SQL query
+        start_date_str = start_date.strftime("%Y-%m-%d")
+        end_date_str = end_date.strftime("%Y-%m-%d")
+
+        query = f"""
+            SELECT whats.what
+              , COUNT(*) AS cnt
+            FROM (
+                SELECT '02 files' AS what
+                  , b_file.TIMESTAMP_X AS timestamp
+                FROM b_file
+                UNION ALL
+                SELECT '04 search changes' AS what
+                  , b_search_content.DATE_CHANGE AS timestamp
+                FROM b_search_content
+                UNION ALL
+                SELECT '01 added' AS what
+                  , b_iblock_element.DATE_CREATE AS timestamp
+                FROM b_iblock_element
+                UNION ALL
+                SELECT '03 updated' AS what
+                  , b_iblock_element.TIMESTAMP_X AS timestamp
+                FROM b_iblock_element) AS whats
+            WHERE whats.timestamp BETWEEN STR_TO_DATE('{start_date_str}','%Y-%m-%d') AND STR_TO_DATE('{end_date_str}','%Y-%m-%d')
+            GROUP BY whats.what
+            ORDER BY whats.what;
+        """
+
+        statistics = await self._query(query)
+
+        LOGGER.info("Finished exporting monthly statistics from %s to %s", start_date, end_date)
+        LOGGER.info(statistics)
+
+        return statistics
