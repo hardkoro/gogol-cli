@@ -218,3 +218,92 @@ class DatabaseClient:
         LOGGER.info(statistics)
 
         return statistics
+
+    async def add_chronograph_section(self, section_name: str) -> None:
+        """Add chronograph section."""
+        LOGGER.info("Adding chronograph section %s ...", section_name)
+
+        async with self._session_maker() as session:
+            query = f"""
+                INSERT INTO b_iblock_section(timestamp_x, modified_by, date_create, created_by, iblock_id, iblock_section_id, active, global_active, sort, name, picture, depth_level, searchable_content, tmp_id, detail_picture, socnet_group_id)
+                VALUES (NOW(), 1, NOW(), 1, 8, NULL, 'Y', 'Y', 500, '{section_name}', NULL, 1, '{section_name.upper()}', 0, NULL, NULL);
+            """
+            await session.execute(text(query))
+
+            if not self._dry_run:
+                await session.commit()
+
+        LOGGER.info("Finished adding chronograph section %s", section_name)
+
+    async def get_chronograph_section_by_name(self, section_name: str) -> int:
+        """Get chronograph section by name."""
+        query = f"""
+            SELECT id
+            FROM b_iblock_section
+            WHERE name = '{section_name}';
+        """
+        chronograph_section = await self._query(query)
+
+        return chronograph_section[0]["id"]
+
+    async def copy_chronograph_section(
+        self, new_chronograph_section_id: int, previous_chronograph_section_id: int
+    ) -> None:
+        """Copy chronograph section."""
+        LOGGER.info(
+            "Copying chronograph section %s to %s ...",
+            previous_chronograph_section_id,
+            new_chronograph_section_id,
+        )
+
+        async with self._session_maker() as session:
+            query = f"""
+                UPDATE b_iblock_element
+                SET iblock_section_id = {new_chronograph_section_id}
+                  , modified_by = 1
+                  , date_create = NOW()
+                  , created_by = 1
+                  , active = 'Y'
+                  , active_from = active_from + INTERVAL 5 YEAR
+                  , active_to = active_to + INTERVAL 5 YEAR
+                WHERE iblock_section_id = {previous_chronograph_section_id};
+            """
+            await session.execute(text(query))
+
+            affected_elements = await self._get_affected_elements(new_chronograph_section_id)
+
+            for element_id in affected_elements:
+                query = f"""
+                    UPDATE b_iblock_element_property
+                    SET value = value + 5
+                    WHERE iblock_element_id = {element_id}
+                      AND iblock_property_id = 23;
+                """
+                await session.execute(text(query))
+
+            query = f"""
+                UPDATE b_iblock_section
+                SET active = 'N'
+                WHERE id = {previous_chronograph_section_id};
+            """
+            await session.execute(text(query))
+
+            if not self._dry_run:
+                await session.commit()
+
+        LOGGER.info(
+            "Finished copying chronograph section %s to %s",
+            previous_chronograph_section_id,
+            new_chronograph_section_id,
+        )
+
+    async def _get_affected_elements(self, new_chronograph_section_id: int) -> list[int]:
+        """Get affected elements."""
+        query = f"""
+            SELECT id
+            FROM b_iblock_element
+            WHERE iblock_section_id = {new_chronograph_section_id};
+        """
+        affected_elements = await self._query(query)
+
+        return [element["id"] for element in affected_elements]

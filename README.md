@@ -36,6 +36,12 @@ Export monthly statistics:
 poetry run python -m gogol_pin export <month-number> <year-suffix>
 ```
 
+Copy chronograph entries:
+
+```shell
+poetry run python -m gogol_pin chrono <month-number> <year-suffix> --dry-run
+```
+
 ## Development
 
 To lint the project run the following command to execute the linting script:

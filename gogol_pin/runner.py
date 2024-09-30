@@ -46,3 +46,16 @@ async def export_statistics(
 
     exporter = PlainExporter()
     exporter.export(statistics)
+
+
+async def copy_chronograph(
+    database_uri: str,
+    month_number: int,
+    year_suffix: str,
+    dry_run: bool,
+) -> None:
+    """Run the script."""
+    database_client = DatabaseClient(database_uri, dry_run=dry_run)
+    pin_service = GogolService(database_client)
+
+    await pin_service.copy_chronograph(month_number, year_suffix)
