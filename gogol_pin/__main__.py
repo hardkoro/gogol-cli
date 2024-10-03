@@ -3,7 +3,6 @@
 import asyncio
 import logging
 
-from datetime import datetime
 from typing import Annotated
 
 import typer
@@ -35,12 +34,23 @@ def pin(
 def copy(
     database_uri: Annotated[str, typer.Option(help="Database URI", envvar="DATABASE_URI")],
     event_url: Annotated[str, typer.Argument(help="Event URL")],
-    new_event_datetime: Annotated[datetime, typer.Option(help="New event date and time")],
+    new_event_date_str: Annotated[str, typer.Argument(help="New event date (2024-10-20)")],
+    new_event_time_str: Annotated[str, typer.Argument(help="New event time (18-00)")],
+    new_price: Annotated[str, typer.Option(help="New event price (100–300)")] | None = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
 ) -> None:
     """Copy the event."""
     uvloop.install()
-    asyncio.run(run_copy_event(database_uri, event_url, dry_run, new_event_datetime))
+    asyncio.run(
+        run_copy_event(
+            database_uri,
+            event_url,
+            new_event_date_str,
+            new_event_time_str,
+            new_price,
+            dry_run,
+        )
+    )
 
 
 @app.command()

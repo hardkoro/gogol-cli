@@ -1,7 +1,7 @@
 """Clients."""
 
 from itertools import count
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 
 from sqlalchemy import text
@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine, Asyn
 from gogol_pin.schemas import Event
 from gogol_pin.exceptions import EventNotFoundError
 
+DATE_FORMAT = "%d.%m.%Y"
+DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 LOGGER = logging.getLogger(__name__)
 
@@ -18,13 +20,22 @@ class DatabaseClient:
     """Database client."""
 
     PIN_IBLOCK_ID = 38
+    EVENT_IBLOCK_ID = 6
+
     PIN_IBLOCK_SECTION_ID = None
+
     PIN_DEFAULT_SORT = 50
+    EVENT_DEFAULT_SORT = 500
+
     DEFAULT_USER_ID = 1
 
     PIN_LINK_PROPERTY_ID = 150
     PIN_BUTTON_TEXT_PROPERTY_ID = 149
     PIN_NAME = 148
+
+    EVENT_DATE_PROPERTY_ID = 5
+    EVENT_TIME_PROPERTY_ID = 15
+    EVENT_PRICE_PROPERTY_ID = 129
 
     def __init__(self, database_uri: str, dry_run: bool) -> None:
         """Initialize the client."""
@@ -70,6 +81,8 @@ class DatabaseClient:
                 b_iblock_element.active_from,
                 b_iblock_element.active_to,
                 b_iblock_element.preview_picture,
+                b_iblock_element.preview_text,
+                b_iblock_element.preview_text_type,
                 b_iblock_element.detail_picture,
                 b_iblock_element.detail_text,
                 b_iblock_element.detail_text_type
@@ -95,6 +108,8 @@ class DatabaseClient:
             active_from=event["active_from"],
             active_to=event["active_to"],
             preview_picture=event["preview_picture"],
+            preview_text=event["preview_text"],
+            preview_text_type=event["preview_text_type"],
             detail_picture=event["detail_picture"],
             detail_text=event["detail_text"],
             detail_text_type=event["detail_text_type"],
@@ -107,20 +122,28 @@ class DatabaseClient:
         async with self._session_maker() as session:
             preview_picture_id = await self._copy_preview_picture(session, event)
             pinned_event_id = await self._pin_event(session, event, preview_picture_id)
-            await self._copy_properties_from_event_to_pin(session, event, pinned_event_id)
+            await self._set_properties(session, event, pinned_event_id)
 
             if not self._dry_run:
                 await session.commit()
 
         LOGGER.info("Finished pinning event %s", event.id)
 
+    async def _copy_detail_picture(self, session: AsyncSession, event: Event) -> int:
+        """Copy detail picture."""
+        return await self._copy_picture(session, event.detail_picture)
+
     async def _copy_preview_picture(self, session: AsyncSession, event: Event) -> int:
         """Copy preview picture."""
+        return await self._copy_picture(session, event.preview_picture)
+
+    async def _copy_picture(self, session: AsyncSession, picture_id: int | None) -> int:
+        """Copy picture."""
         query = f"""
             INSERT INTO b_file(timestamp_x, module_id, height, width, file_size, content_type, subdir, file_name, original_name, description, handler_id, external_id)
             SELECT timestamp_x, module_id, height, width, file_size, content_type, subdir, file_name, original_name, description, handler_id, external_id
             FROM b_file
-            WHERE id = '{event.preview_picture}';
+            WHERE id = '{picture_id}';
         """
         await session.execute(text(query))
 
@@ -138,9 +161,11 @@ class DatabaseClient:
         self, session: AsyncSession, event: Event, preview_picture_id: int
     ) -> int:
         """Pin event."""
+        now = datetime.now(tz=None).strftime(DATETIME_FORMAT)
+        user = self.DEFAULT_USER_ID
         query = f"""
             INSERT INTO b_iblock_element(timestamp_x, modified_by, date_create, created_by, iblock_id, active, active_from, active_to, sort, name, preview_picture, searchable_content, tmp_id)
-            VALUES ('{datetime.now(tz=None).strftime('%Y-%m-%d %H:%M:%S')}', '{self.DEFAULT_USER_ID}', '{datetime.now(tz=None).strftime('%Y-%m-%d %H:%M:%S')}', '{self.DEFAULT_USER_ID}', '{self.PIN_IBLOCK_ID}', 'Y', '{event.active_from}', '{event.active_to}', '{self.PIN_DEFAULT_SORT}', '{event.name}', {preview_picture_id}, '{event.name.upper()}', 0);
+            VALUES ('{now}', '{user}', '{now}', '{user}', '{self.PIN_IBLOCK_ID}', 'Y', '{event.active_from}', '{event.active_to}', '{self.PIN_DEFAULT_SORT}', '{event.name}', {preview_picture_id}, '{event.name.upper()}', 0);
         """
         await session.execute(text(query))
 
@@ -153,30 +178,142 @@ class DatabaseClient:
 
         return int(event_id)
 
-    async def _copy_properties_from_event_to_pin(
-        self, session: AsyncSession, event: Event, pinned_event_id: int
+    async def _copy_event(  # pylint: disable=too-many-locals
+        self,
+        session: AsyncSession,
+        event: Event,
+        preview_picture_id: int,
+        detail_picture_id: int,
+        new_event_date: datetime,
+        new_event_time: str,
+    ) -> int:
+        """Pin event."""
+        now = datetime.now(tz=None).strftime(DATETIME_FORMAT)
+        user = self.DEFAULT_USER_ID
+
+        hours, minutes = new_event_time.split("-")
+        active_to_datetime = new_event_date + timedelta(hours=int(hours), minutes=int(minutes))
+        active_to = active_to_datetime.strftime(DATETIME_FORMAT)
+
+        query = f"""
+            INSERT INTO b_iblock_element(timestamp_x, modified_by, date_create, created_by, iblock_id, active, active_from, active_to, sort, name, preview_picture, preview_text, preview_text_type, detail_picture, detail_text, detail_text_type, searchable_content, tmp_id)
+            VALUES ('{now}', '{user}', '{now}', '{user}', '{self.EVENT_IBLOCK_ID}', 'Y', '{now}', '{active_to}', '{self.EVENT_DEFAULT_SORT}', '{event.name}', {preview_picture_id}, '{event.preview_text}', '{event.preview_text_type}', {detail_picture_id}, '{event.detail_text}', '{event.detail_text_type}', '{event.name.upper()}', 0);
+        """
+        await session.execute(text(query))
+
+        query = """
+            SELECT MAX(id) AS `id`
+            FROM b_iblock_element;
+        """
+        events = await self._query(query)
+        event_id = events[0]["id"]
+
+        return int(event_id)
+
+    async def _set_properties(
+        self,
+        session: AsyncSession,
+        event: Event,
+        pin_id: int,
     ) -> None:
         """Copy properties from event to pin."""
         query = f"""
             UPDATE b_iblock_element
-            SET xml_id = '{pinned_event_id}'
-            WHERE id = '{pinned_event_id}';
+            SET xml_id = '{pin_id}'
+            WHERE id = '{pin_id}';
             INSERT INTO b_iblock_element_property (iblock_property_id, iblock_element_id, value, value_type, value_num)
-            VALUES ('{self.PIN_LINK_PROPERTY_ID}', '{pinned_event_id}', '{event.url}', 'text', 0.0000),
-            ('{self.PIN_BUTTON_TEXT_PROPERTY_ID}', '{pinned_event_id}', 'Подробнее', 'text', 0.0000),
-            ('{self.PIN_NAME}', '{pinned_event_id}', '{event.name}', 'text', 0.0000);
+            VALUES ('{self.PIN_LINK_PROPERTY_ID}', '{pin_id}', '{event.url}', 'text', 0.0000)
+            ,('{self.PIN_BUTTON_TEXT_PROPERTY_ID}', '{pin_id}', 'Подробнее', 'text', 0.0000)
+            ,('{self.PIN_NAME}', '{pin_id}', '{event.name}', 'text', 0.0000);
         """
+
         await session.execute(text(query))
 
-    async def copy_event(self, event: Event, new_event_datetime: datetime) -> None:
+    async def _copy_properties(
+        self,
+        session: AsyncSession,
+        old_event: Event,
+        new_event_id: int,
+        new_event_date: datetime,
+        new_event_time: str,
+        new_event_price: str | None,
+    ) -> None:
+        """Copy properties from event to event."""
+        query = f"""
+            UPDATE b_iblock_element
+            SET xml_id = '{new_event_id}'
+            WHERE id = '{new_event_id}';
+            INSERT INTO b_iblock_element_property (iblock_property_id, iblock_element_id, value, value_type, value_num)
+            SELECT iblock_property_id, '{new_event_id}', value, value_type, value_num
+            FROM b_iblock_element_property
+            WHERE iblock_element_id = '{old_event.id}';
+        """
+
+        await session.execute(text(query))
+
+        query = f"""
+            UPDATE b_iblock_element_property
+            SET value = '{new_event_date.strftime(DATE_FORMAT)}'
+            WHERE iblock_element_id = '{new_event_id}'
+            AND iblock_property_id = '{self.EVENT_DATE_PROPERTY_ID}';
+        """
+
+        await session.execute(text(query))
+
+        query = f"""
+            UPDATE b_iblock_element_property
+            SET value = '{new_event_time}'
+            WHERE iblock_element_id = '{new_event_id}'
+            AND iblock_property_id = '{self.EVENT_TIME_PROPERTY_ID}';
+        """
+
+        await session.execute(text(query))
+
+        if new_event_price is not None:
+            query = f"""
+                UPDATE b_iblock_element_property
+                SET value = '{new_event_price}'
+                WHERE iblock_element_id = '{new_event_id}'
+                AND iblock_property_id = '{self.EVENT_PRICE_PROPERTY_ID}';
+            """
+
+            await session.execute(text(query))
+
+    async def copy_event(
+        self,
+        old_event: Event,
+        new_event_date: datetime,
+        new_event_time: str,
+        new_event_price: str | None,
+    ) -> None:
         """Copy event."""
-        LOGGER.info("Copying event %s to %s ...", event.id, new_event_datetime)
+        LOGGER.info("Copying event %s to %s ...", old_event.id, new_event_date)
 
         async with self._session_maker() as session:
+            preview_picture_id = await self._copy_preview_picture(session, old_event)
+            detail_picture_id = await self._copy_detail_picture(session, old_event)
+
+            new_event_id = await self._copy_event(
+                session,
+                old_event,
+                preview_picture_id,
+                detail_picture_id,
+                new_event_date,
+                new_event_time,
+            )
+            await self._copy_properties(
+                session,
+                old_event,
+                new_event_id,
+                new_event_date,
+                new_event_time,
+                new_event_price,
+            )
+
             if not self._dry_run:
                 await session.commit()
 
-        LOGGER.info("Finished copying event %s to %s", event.id, new_event_datetime)
+        LOGGER.info("Finished copying event %s to %s", old_event.id, new_event_date)
 
     async def export_statistics(
         self, start_date: datetime, end_date: datetime

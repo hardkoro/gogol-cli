@@ -91,3 +91,6 @@ min-public-methods = 0
 [tool.mypy]
 # Specify the directories to include for type checking.
 exclude = ["migrations"]
+
+[tool.pylint.'DESIGN']
+max-positional-arguments = 10

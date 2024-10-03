@@ -1,6 +1,5 @@
 """Script run."""
 
-from datetime import datetime
 from gogol_pin.clients import DatabaseClient
 from gogol_pin.exporter import PlainExporter
 from gogol_pin.service import GogolService
@@ -22,15 +21,22 @@ async def pin_event(
 async def copy_event(
     database_uri: str,
     event_url: str,
+    new_event_date_str: str,
+    new_event_time_str: str,
+    new_price: str | None,
     dry_run: bool,
-    new_event_datetime: datetime,
 ) -> None:
     """Run the script."""
     database_client = DatabaseClient(database_uri, dry_run)
     pin_service = GogolService(database_client)
 
-    event = await pin_service.get_event(event_url)
-    await pin_service.copy_event(event, new_event_datetime)
+    old_event = await pin_service.get_event(event_url)
+    await pin_service.copy_event(
+        old_event,
+        new_event_date_str,
+        new_event_time_str,
+        new_price,
+    )
 
 
 async def export_statistics(

@@ -27,7 +27,7 @@ poetry run python -m gogol_pin pin <event-url> --dry-run
 Copy event to the new date:
 
 ```shell
-poetry run python -m gogol_pin copy <event-url> --new-event-datetime <new-event-datetime> --dry-run
+poetry run python -m gogol_pin copy <event-url> <new-event-date> <new-event-time> --new-price <new-price> --dry-run
 ```
 
 Export monthly statistics:
@@ -54,11 +54,13 @@ poetry run ./lint.sh
 
 - [x] Pin event in agenda
 - [x] Why do we need three commits?
-- [ ] Copy event on a new date
+- [x] Copy event on a new date
+  - [ ] Fix issue with date being incorrect
+  - [ ] Allow optional time
 - [x] Export month statistics
 - [ ] Send it via email?
 - [x] Guide the code
-- [ ] Update the chronograph (disable old, enable new)
+- [x] Update the chronograph (disable old, enable new)
 
 ## Problems
 

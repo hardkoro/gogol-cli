@@ -12,6 +12,8 @@ class Event(BaseModel):
     active_from: datetime
     active_to: datetime
     preview_picture: int | None
+    preview_text: str | None
+    preview_text_type: str
     detail_picture: int | None
     detail_text: str | None
     detail_text_type: str

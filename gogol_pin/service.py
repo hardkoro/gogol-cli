@@ -10,6 +10,7 @@ from gogol_pin.exceptions import GogolPinException
 
 LOGGER = logging.getLogger(__name__)
 DATE_FORMAT = "%Y-%m-%d"
+TIME_FORMAT = "%H-%M"
 
 
 class GogolService:
@@ -59,13 +60,25 @@ class GogolService:
 
         LOGGER.info("Finished pinning event %s", event.id)
 
-    async def copy_event(self, event: Event, new_event_datetime: datetime) -> None:
+    async def copy_event(
+        self,
+        event: Event,
+        new_event_date_str: str,
+        new_event_time_str: str,
+        new_price: str | None,
+    ) -> None:
         """Copy event."""
-        LOGGER.info("Copying event %s to %s ...", event.id, new_event_datetime)
+        LOGGER.info("Copying event %s to %s ...", event.id, new_event_date_str)
 
-        await self._database_client.copy_event(event, new_event_datetime)
+        new_event_date = datetime.strptime(new_event_date_str, DATE_FORMAT)
+        await self._database_client.copy_event(
+            event,
+            new_event_date,
+            new_event_time_str,
+            new_price,
+        )
 
-        LOGGER.info("Finished copying event %s to %s", event.id, new_event_datetime)
+        LOGGER.info("Finished copying event %s to %s", event.id, new_event_date_str)
 
     async def export(self, month_number: int, year_suffix: str) -> list[dict[str, int]]:
         """Export monthly statistics."""
