@@ -9,10 +9,10 @@ import typer
 import uvloop
 from dotenv import load_dotenv
 
-from gogol_pin.runner import pin_event as run_pin_event
-from gogol_pin.runner import copy_event as run_copy_event
-from gogol_pin.runner import export_statistics as run_export
-from gogol_pin.runner import copy_chronograph as run_chronograph
+from gogol_cli.runner import pin_event as run_pin_event
+from gogol_cli.runner import copy_event as run_copy_event
+from gogol_cli.runner import export_statistics as run_export
+from gogol_cli.runner import copy_chronograph as run_chronograph
 
 load_dotenv()
 

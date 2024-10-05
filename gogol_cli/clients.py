@@ -7,8 +7,8 @@ import logging
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine, AsyncSession
 
-from gogol_pin.schemas import Event
-from gogol_pin.exceptions import EventNotFoundError
+from gogol_cli.schemas import Event
+from gogol_cli.exceptions import EventNotFoundError
 
 DATE_FORMAT = "%d.%m.%Y"
 DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"

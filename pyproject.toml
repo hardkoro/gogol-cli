@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "gogol-pin"
+name = "gogol-cli"
 version = "0.1.0"
-description = ""
+description = "Gogol CLI"
 authors = ["Evgenii Korobkov <eug.korobkov@gmail.com>"]
 readme = "README.md"
 
@@ -18,10 +18,10 @@ uvloop = "==0.20.0"
 [tool.poetry.dev-dependencies]
 mypy = "==1.11.2"
 pylint = "==3.3.1"
-ruff = "==0.6.8"
+ruff = "==0.6.9"
 
 [tool.poetry.scripts]
-gogol-pin = "gogol_pin.__main__:cli"
+gogol-cli = "gogol_cli.__main__:cli"
 
 [build-system]
 requires = ["poetry-core"]

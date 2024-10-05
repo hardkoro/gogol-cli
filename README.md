@@ -1,4 +1,4 @@
-# Gogol Pin
+# Gogol CLI
 
 The script is the CLI to manipulate the Gogol House database.
 
@@ -15,31 +15,31 @@ echo DATABASE_URI=mysql+aiomysql://user:password@host:port/database > .env
 Show help message:
 
 ```shell
-poetry run python -m gogol_pin --help
+poetry run python -m gogol_cli --help
 ```
 
 Pin event:
 
 ```shell
-poetry run python -m gogol_pin pin <event-url> --dry-run
+poetry run python -m gogol_cli pin <event-url> --dry-run
 ```
 
 Copy event to the new date:
 
 ```shell
-poetry run python -m gogol_pin copy <event-url> <new-event-date> <new-event-time> --new-price <new-price> --dry-run
+poetry run python -m gogol_cli copy <event-url> <new-event-date> <new-event-time> --new-price <new-price> --dry-run
 ```
 
 Export monthly statistics:
 
 ```shell
-poetry run python -m gogol_pin export <month-number> <year-suffix>
+poetry run python -m gogol_cli export <month-number> <year-suffix>
 ```
 
 Copy chronograph entries:
 
 ```shell
-poetry run python -m gogol_pin chrono <month-number> <year-suffix> --dry-run
+poetry run python -m gogol_cli chrono <month-number> <year-suffix> --dry-run
 ```
 
 ## Development
@@ -56,7 +56,7 @@ poetry run ./lint.sh
 - [x] Why do we need three commits?
 - [x] Copy event on a new date
   - [x] Fix issue with date being incorrect
-  - [ ] Allow optional time
+  - [x] Allow optional time
   - [x] Copy tags
 - [x] Export month statistics
 - [ ] Send it via email?

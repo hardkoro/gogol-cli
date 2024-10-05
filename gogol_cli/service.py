@@ -1,11 +1,11 @@
-"""Pin service."""
+"""Gogol CLI service."""
 
 from datetime import datetime
 import logging
 import re
-from gogol_pin.clients import DatabaseClient
-from gogol_pin.schemas import Event
-from gogol_pin.exceptions import GogolPinException
+from gogol_cli.clients import DatabaseClient
+from gogol_cli.schemas import Event
+from gogol_cli.exceptions import GogolCLIException
 
 
 LOGGER = logging.getLogger(__name__)
@@ -13,8 +13,8 @@ DATE_FORMAT = "%Y-%m-%d"
 TIME_FORMAT = "%H-%M"
 
 
-class GogolService:
-    """Pin service."""
+class GogolCLIService:
+    """Gogol CLI service."""
 
     YEAR_REPEAT = 5
 
@@ -43,7 +43,7 @@ class GogolService:
 
         event_id_match = re.search(r"/(\d+)/?$", event_url)
         if event_id_match is None:
-            raise GogolPinException(f"Invalid event URL: {event_url}")
+            raise GogolCLIException(f"Invalid event URL: {event_url}")
         event_id = event_id_match.group(1)
 
         event = await self._database_client.get_event_by_id(event_id)
