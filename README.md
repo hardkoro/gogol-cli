@@ -55,12 +55,14 @@ poetry run ./lint.sh
 - [x] Pin event in agenda
 - [x] Why do we need three commits?
 - [x] Copy event on a new date
-  - [ ] Fix issue with date being incorrect
+  - [x] Fix issue with date being incorrect
   - [ ] Allow optional time
+  - [x] Copy tags
 - [x] Export month statistics
 - [ ] Send it via email?
 - [x] Guide the code
 - [x] Update the chronograph (disable old, enable new)
+- [ ] Rename to Gogol CLI
 
 ## Problems
 

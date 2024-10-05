@@ -33,8 +33,8 @@ class DatabaseClient:
     PIN_BUTTON_TEXT_PROPERTY_ID = 149
     PIN_NAME = 148
 
-    EVENT_DATE_PROPERTY_ID = 5
-    EVENT_TIME_PROPERTY_ID = 15
+    EVENT_TIME_PROPERTY_ID = 14
+    EVENT_DATE_PROPERTY_ID = 15
     EVENT_PRICE_PROPERTY_ID = 129
 
     def __init__(self, database_uri: str, dry_run: bool) -> None:
@@ -85,7 +85,8 @@ class DatabaseClient:
                 b_iblock_element.preview_text_type,
                 b_iblock_element.detail_picture,
                 b_iblock_element.detail_text,
-                b_iblock_element.detail_text_type
+                b_iblock_element.detail_text_type,
+                b_iblock_element.tags
             FROM
                 b_iblock_element
             WHERE
@@ -113,6 +114,7 @@ class DatabaseClient:
             detail_picture=event["detail_picture"],
             detail_text=event["detail_text"],
             detail_text_type=event["detail_text_type"],
+            tags=event["tags"],
         )
 
     async def pin_event(self, event: Event) -> None:
@@ -196,8 +198,8 @@ class DatabaseClient:
         active_to = active_to_datetime.strftime(DATETIME_FORMAT)
 
         query = f"""
-            INSERT INTO b_iblock_element(timestamp_x, modified_by, date_create, created_by, iblock_id, active, active_from, active_to, sort, name, preview_picture, preview_text, preview_text_type, detail_picture, detail_text, detail_text_type, searchable_content, tmp_id)
-            VALUES ('{now}', '{user}', '{now}', '{user}', '{self.EVENT_IBLOCK_ID}', 'Y', '{now}', '{active_to}', '{self.EVENT_DEFAULT_SORT}', '{event.name}', {preview_picture_id}, '{event.preview_text}', '{event.preview_text_type}', {detail_picture_id}, '{event.detail_text}', '{event.detail_text_type}', '{event.name.upper()}', 0);
+            INSERT INTO b_iblock_element(timestamp_x, modified_by, date_create, created_by, iblock_id, active, active_from, active_to, sort, name, preview_picture, preview_text, preview_text_type, detail_picture, detail_text, detail_text_type, searchable_content, tags, tmp_id)
+            VALUES ('{now}', '{user}', '{now}', '{user}', '{self.EVENT_IBLOCK_ID}', 'Y', '{now}', '{active_to}', '{self.EVENT_DEFAULT_SORT}', '{event.name}', {preview_picture_id}, '{event.preview_text}', '{event.preview_text_type}', {detail_picture_id}, '{event.detail_text}', '{event.detail_text_type}', '{event.name.upper()}', '{event.tags}', 0);
         """
         await session.execute(text(query))
 
@@ -253,18 +255,18 @@ class DatabaseClient:
 
         query = f"""
             UPDATE b_iblock_element_property
-            SET value = '{new_event_date.strftime(DATE_FORMAT)}'
+            SET value = '{new_event_time.replace("-", ":")}'
             WHERE iblock_element_id = '{new_event_id}'
-            AND iblock_property_id = '{self.EVENT_DATE_PROPERTY_ID}';
+            AND iblock_property_id = '{self.EVENT_TIME_PROPERTY_ID}';
         """
 
         await session.execute(text(query))
 
         query = f"""
             UPDATE b_iblock_element_property
-            SET value = '{new_event_time}'
+            SET value = '{new_event_date.strftime(DATE_FORMAT)}'
             WHERE iblock_element_id = '{new_event_id}'
-            AND iblock_property_id = '{self.EVENT_TIME_PROPERTY_ID}';
+            AND iblock_property_id = '{self.EVENT_DATE_PROPERTY_ID}';
         """
 
         await session.execute(text(query))

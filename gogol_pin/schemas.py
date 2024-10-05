@@ -17,6 +17,7 @@ class Event(BaseModel):
     detail_picture: int | None
     detail_text: str | None
     detail_text_type: str
+    tags: str | None
 
     @property
     def url(self) -> str:
