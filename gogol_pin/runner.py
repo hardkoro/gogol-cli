@@ -22,7 +22,7 @@ async def copy_event(
     database_uri: str,
     event_url: str,
     new_event_date_str: str,
-    new_event_time_str: str,
+    new_event_time_str: str | None,
     new_price: str | None,
     dry_run: bool,
 ) -> None:

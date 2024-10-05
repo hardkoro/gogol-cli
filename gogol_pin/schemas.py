@@ -23,3 +23,13 @@ class Event(BaseModel):
     def url(self) -> str:
         """Get event URL."""
         return f"https://www.domgogolya.ru/recital/{self.id}/"
+
+    @property
+    def active_to_hours(self) -> str:
+        """Get active to hours."""
+        return self.active_to.strftime("%H")
+
+    @property
+    def active_to_minutes(self) -> str:
+        """Get active to minutes."""
+        return self.active_to.strftime("%M")

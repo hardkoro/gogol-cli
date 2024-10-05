@@ -35,7 +35,8 @@ def copy(
     database_uri: Annotated[str, typer.Option(help="Database URI", envvar="DATABASE_URI")],
     event_url: Annotated[str, typer.Argument(help="Event URL")],
     new_event_date_str: Annotated[str, typer.Argument(help="New event date (2024-10-20)")],
-    new_event_time_str: Annotated[str, typer.Argument(help="New event time (18-00)")],
+    new_event_time_str: Annotated[str, typer.Argument(help="New event time (18-00)")]
+    | None = None,
     new_price: Annotated[str, typer.Option(help="New event price (100–300)")] | None = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
 ) -> None:
