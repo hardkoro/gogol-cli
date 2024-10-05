@@ -61,10 +61,31 @@ def export(
     year_suffix: Annotated[
         str, typer.Argument(help="Two last letters of the year (24, 25, and so on)")
     ],
+    smtp_host: Annotated[str, typer.Option(help="SMTP host", envvar="SMTP_HOST")],
+    smtp_port: Annotated[int, typer.Option(help="SMTP port", envvar="SMTP_PORT")],
+    smtp_username: Annotated[str, typer.Option(help="SMTP username", envvar="SMTP_USERNAME")],
+    smtp_password: Annotated[str, typer.Option(help="SMTP password", envvar="SMTP_PASSWORD")],
+    from_addr: Annotated[str, typer.Option(help="From address", envvar="FROM_ADDR")],
+    to_addr: Annotated[str, typer.Option(help="To address", envvar="TO_ADDR")],
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
 ) -> None:
     """Export monthly statistics."""
     uvloop.install()
-    asyncio.run(run_export(database_uri, month_number, year_suffix))
+
+    asyncio.run(
+        run_export(
+            database_uri,
+            month_number,
+            year_suffix,
+            dry_run,
+            smtp_host,
+            smtp_port,
+            smtp_username,
+            smtp_password,
+            from_addr,
+            to_addr,
+        )
+    )
 
 
 @app.command()

@@ -12,6 +12,19 @@ cp .env.example .env
 echo DATABASE_URI=mysql+aiomysql://user:password@host:port/database > .env
 ```
 
+Additionally, if you want to send emails with exported monthly statistics, export
+SMTP and email config as follows:
+
+```shell
+echo SMTP_HOST=smtp_host > .env
+echo SMTP_PORT=smtp_port > .env
+echo SMTP_USERNAME=smtp_username > .env
+echo SMTP_PASSWORD=smtp_password > .env
+
+echo FROM_ADDR=from_addr > .env
+echo TO_ADDRS=to_addrs > .env
+```
+
 Show help message:
 
 ```shell
@@ -50,21 +63,7 @@ To lint the project run the following command to execute the linting script:
 poetry run ./lint.sh
 ```
 
-## To-do
-
-- [x] Pin event in agenda
-- [x] Why do we need three commits?
-- [x] Copy event on a new date
-  - [x] Fix issue with date being incorrect
-  - [x] Allow optional time
-  - [x] Copy tags
-- [x] Export month statistics
-- [ ] Send it via email?
-- [x] Guide the code
-- [x] Update the chronograph (disable old, enable new)
-- [ ] Rename to Gogol CLI
-
-## Problems
+## Known Issues
 
 - Images are not duplicated, but linked more than once to event (originally) and
   to the pin. This can be problematic if we ever delete a pin. It will lead to
