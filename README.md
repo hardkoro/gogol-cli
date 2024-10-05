@@ -46,7 +46,7 @@ poetry run python -m gogol_cli copy <event-url> <new-event-date> <new-event-time
 Export monthly statistics:
 
 ```shell
-poetry run python -m gogol_cli export <month-number> <year-suffix>
+poetry run python -m gogol_cli export <month-number> <year-suffix> --dry-run
 ```
 
 Copy chronograph entries:
