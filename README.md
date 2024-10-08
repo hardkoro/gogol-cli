@@ -40,7 +40,7 @@ poetry run python -m gogol_cli pin <event-url> --dry-run
 Copy event to the new date:
 
 ```shell
-poetry run python -m gogol_cli copy <event-url> <new-event-date> <new-event-time> --new-price <new-price> --dry-run
+poetry run python -m gogol_cli copy <event-url> <new-event-date-str> --new-event-time-str <new-event-time-str> --new-price <new-price> --dry-run
 ```
 
 Export monthly statistics:
