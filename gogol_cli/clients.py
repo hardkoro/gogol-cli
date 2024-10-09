@@ -21,6 +21,7 @@ class DatabaseClient:
 
     PIN_IBLOCK_ID = 38
     EVENT_IBLOCK_ID = 6
+    EVENT_IBLOCK_SECTION_ID = 7
 
     PIN_IBLOCK_SECTION_ID = None
 
@@ -316,11 +317,26 @@ class DatabaseClient:
                 new_event_time,
                 new_event_price,
             )
+            await self._add_element_to_section(session, new_event_id, self.EVENT_IBLOCK_SECTION_ID)
 
             if not self._dry_run:
                 await session.commit()
 
         LOGGER.info("Finished copying event %s to %s", old_event.id, new_event_date)
+
+    async def _add_element_to_section(
+        self,
+        session: AsyncSession,
+        element_id: int,
+        section_id: int,
+    ) -> None:
+        """Add element to section."""
+        query = f"""
+            INSERT INTO b_iblock_section_element (iblock_section_id, iblock_element_id, additional_property_id)
+            VALUES ('{section_id}', '{element_id}', NULL);
+        """
+
+        await session.execute(text(query))
 
     async def export_statistics(
         self, start_date: datetime, end_date: datetime
