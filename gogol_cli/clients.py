@@ -32,7 +32,7 @@ class DatabaseClient:
 
     PIN_LINK_PROPERTY_ID = 150
     PIN_BUTTON_TEXT_PROPERTY_ID = 149
-    PIN_NAME = 148
+    PIN_NAME_PROPERTY_ID = 148
 
     EVENT_TIME_PROPERTY_ID = 14
     EVENT_DATE_PROPERTY_ID = 15
@@ -203,8 +203,8 @@ class DatabaseClient:
         active_to = active_to_datetime.strftime(DATETIME_FORMAT)
 
         query = f"""
-            INSERT INTO b_iblock_element(timestamp_x, modified_by, date_create, created_by, iblock_id, active, active_from, active_to, sort, name, preview_picture, preview_text, preview_text_type, detail_picture, detail_text, detail_text_type, searchable_content, tags, tmp_id)
-            VALUES ('{now}', '{user}', '{now}', '{user}', '{self.EVENT_IBLOCK_ID}', 'Y', '{now}', '{active_to}', '{self.EVENT_DEFAULT_SORT}', '{event.name}', {preview_picture_id}, '{event.preview_text}', '{event.preview_text_type}', {detail_picture_id}, '{event.detail_text}', '{event.detail_text_type}', '{event.name.upper()}', '{event.tags}', 0);
+            INSERT INTO b_iblock_element(timestamp_x, modified_by, date_create, created_by, iblock_id, iblock_section_id, active, active_from, active_to, sort, name, preview_picture, preview_text, preview_text_type, detail_picture, detail_text, detail_text_type, searchable_content, tags, tmp_id)
+            VALUES ('{now}', '{user}', '{now}', '{user}', '{self.EVENT_IBLOCK_ID}', '{self.EVENT_IBLOCK_SECTION_ID}', 'Y', '{now}', '{active_to}', '{self.EVENT_DEFAULT_SORT}', '{event.name}', {preview_picture_id}, '{event.preview_text}', '{event.preview_text_type}', {detail_picture_id}, '{event.detail_text}', '{event.detail_text_type}', '{event.name.upper()}', '{event.tags}', 0);
         """
         await session.execute(text(query))
 
@@ -231,7 +231,7 @@ class DatabaseClient:
             INSERT INTO b_iblock_element_property (iblock_property_id, iblock_element_id, value, value_type, value_num)
             VALUES ('{self.PIN_LINK_PROPERTY_ID}', '{pin_id}', '{event.url}', 'text', 0.0000)
             ,('{self.PIN_BUTTON_TEXT_PROPERTY_ID}', '{pin_id}', 'Подробнее', 'text', 0.0000)
-            ,('{self.PIN_NAME}', '{pin_id}', '{event.name}', 'text', 0.0000);
+            ,('{self.PIN_NAME_PROPERTY_ID}', '{pin_id}', '{event.name}', 'text', 0.0000);
         """
 
         await session.execute(text(query))

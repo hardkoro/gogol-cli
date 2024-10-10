@@ -67,4 +67,4 @@ poetry run ./lint.sh
 
 - Images are not duplicated, but linked more than once to event (originally) and
   to the pin. This can be problematic if we ever delete a pin. It will lead to
-  the "deletion" of corresponding image in the event too. 
+  the "deletion" of corresponding image in the event too.
