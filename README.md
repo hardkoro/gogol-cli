@@ -2,6 +2,14 @@
 
 The script is the CLI to manipulate the Gogol House database.
 
+## Installation
+
+Install project dependencies using Poetry:
+
+```shell
+poetry install
+```
+
 ## Run the script
 
 Create a copy of `.env.example` file and populate it with the correct database URI:

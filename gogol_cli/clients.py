@@ -407,7 +407,10 @@ class DatabaseClient:
         return chronograph_section[0]["id"]
 
     async def copy_chronograph_section(
-        self, new_chronograph_section_id: int, previous_chronograph_section_id: int
+        self,
+        new_chronograph_section_id: int,
+        previous_chronograph_section_id: int,
+        new_section_name: str,
     ) -> None:
         """Copy chronograph section."""
         LOGGER.info(
@@ -426,6 +429,13 @@ class DatabaseClient:
                   , active = 'Y'
                   , active_from = active_from + INTERVAL 5 YEAR
                   , active_to = active_to + INTERVAL 5 YEAR
+                WHERE iblock_section_id = {previous_chronograph_section_id};
+            """
+            await session.execute(text(query))
+            query = f"""
+                INSERT INTO b_iblock_section_element (iblock_section_id, iblock_element_id, additional_property_id)
+                SELECT {new_chronograph_section_id}, id, NULL
+                FROM b_iblock_element
                 WHERE iblock_section_id = {previous_chronograph_section_id};
             """
             await session.execute(text(query))
