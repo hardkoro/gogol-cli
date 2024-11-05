@@ -9,6 +9,7 @@ readme = "README.md"
 python = "==3.11.1"
 
 aiomysql = "==0.2.0"
+diagrams = "==0.23.4"
 pydantic = "==2.9.2"
 python-dotenv = "==1.0.1"
 sqlalchemy = "==2.0.35"
