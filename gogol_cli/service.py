@@ -64,7 +64,7 @@ class GogolCLIService:
         self,
         event: Event,
         new_event_date_str: str,
-        new_event_time_str: str | None,
+        new_event_time_str: str,
         new_price: str | None,
     ) -> None:
         """Copy event."""

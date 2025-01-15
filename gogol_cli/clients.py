@@ -188,17 +188,13 @@ class DatabaseClient:
         preview_picture_id: int,
         detail_picture_id: int,
         new_event_date: datetime,
-        new_event_time: str | None,
+        new_event_time: str,
     ) -> int:
         """Pin event."""
         now = datetime.now(tz=None).strftime(DATETIME_FORMAT)
         user = self.DEFAULT_USER_ID
 
-        hours, minutes = (
-            new_event_time.split("-")
-            if new_event_time
-            else (event.active_to_hours, event.active_to_minutes)
-        )
+        hours, minutes = new_event_time.split("-")
         active_to_datetime = new_event_date + timedelta(hours=int(hours), minutes=int(minutes))
         active_to = active_to_datetime.strftime(DATETIME_FORMAT)
 
@@ -242,7 +238,7 @@ class DatabaseClient:
         old_event: Event,
         new_event_id: int,
         new_event_date: datetime,
-        new_event_time: str | None,
+        new_event_time: str,
         new_event_price: str | None,
     ) -> None:
         """Copy properties from event to event."""
@@ -258,15 +254,14 @@ class DatabaseClient:
 
         await session.execute(text(query))
 
-        if new_event_time is not None:
-            query = f"""
-                UPDATE b_iblock_element_property
-                SET value = '{new_event_time.replace("-", ":")}'
-                WHERE iblock_element_id = '{new_event_id}'
-                AND iblock_property_id = '{self.EVENT_TIME_PROPERTY_ID}';
-            """
+        query = f"""
+            UPDATE b_iblock_element_property
+            SET value = '{new_event_time.replace("-", ":")}'
+            WHERE iblock_element_id = '{new_event_id}'
+            AND iblock_property_id = '{self.EVENT_TIME_PROPERTY_ID}';
+        """
 
-            await session.execute(text(query))
+        await session.execute(text(query))
 
         query = f"""
             UPDATE b_iblock_element_property
@@ -291,7 +286,7 @@ class DatabaseClient:
         self,
         old_event: Event,
         new_event_date: datetime,
-        new_event_time: str | None,
+        new_event_time: str,
         new_event_price: str | None,
     ) -> None:
         """Copy event."""
@@ -436,7 +431,7 @@ class DatabaseClient:
                 INSERT INTO b_iblock_section_element (iblock_section_id, iblock_element_id, additional_property_id)
                 SELECT {new_chronograph_section_id}, id, NULL
                 FROM b_iblock_element
-                WHERE iblock_section_id = {previous_chronograph_section_id};
+                WHERE iblock_section_id = {new_chronograph_section_id};
             """
             await session.execute(text(query))
 
