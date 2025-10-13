@@ -166,9 +166,10 @@ class DatabaseClient:
         """Pin event."""
         now = datetime.now(tz=None).strftime(DATETIME_FORMAT)
         user = self.DEFAULT_USER_ID
+        active_to = event.active_to - timedelta(hours=1)
         query = f"""
             INSERT INTO b_iblock_element(timestamp_x, modified_by, date_create, created_by, iblock_id, active, active_from, active_to, sort, name, preview_picture, searchable_content, tmp_id)
-            VALUES ('{now}', '{user}', '{now}', '{user}', '{self.PIN_IBLOCK_ID}', 'Y', '{event.active_from}', '{event.active_to}', '{self.PIN_DEFAULT_SORT}', '{event.name}', {preview_picture_id}, '{event.name.upper()}', 0);
+            VALUES ('{now}', '{user}', '{now}', '{user}', '{self.PIN_IBLOCK_ID}', 'Y', '{event.active_from}', '{active_to}', '{self.PIN_DEFAULT_SORT}', '{event.name}', {preview_picture_id}, '{event.name.upper()}', 0);
         """
         await session.execute(text(query))
 
@@ -195,7 +196,7 @@ class DatabaseClient:
         user = self.DEFAULT_USER_ID
 
         hours, minutes = new_event_time.split("-")
-        active_to_datetime = new_event_date + timedelta(hours=int(hours), minutes=int(minutes))
+        active_to_datetime = new_event_date + timedelta(hours=int(hours) + 1, minutes=int(minutes))
         active_to = active_to_datetime.strftime(DATETIME_FORMAT)
 
         query = f"""
