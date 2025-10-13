@@ -14,15 +14,16 @@ from gogol_cli.service import GogolCLIService
 
 async def pin_event(
     database_uri: str,
-    event_url: str,
+    event_urls: list[str],
     dry_run: bool,
 ) -> None:
     """Run the script."""
     database_client = DatabaseClient(database_uri, dry_run)
     cli_service = GogolCLIService(database_client)
 
-    event = await cli_service.get_event(event_url)
-    await cli_service.pin_event(event)
+    for event_url in event_urls:
+        event = await cli_service.get_event(event_url)
+        await cli_service.pin_event(event)
 
 
 async def copy_event(

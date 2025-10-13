@@ -406,7 +406,6 @@ class DatabaseClient:
         self,
         new_chronograph_section_id: int,
         previous_chronograph_section_id: int,
-        new_section_name: str,
     ) -> None:
         """Copy chronograph section."""
         LOGGER.info(

@@ -133,7 +133,6 @@ class GogolCLIService:
         await self._database_client.copy_chronograph_section(
             new_chronograph_section_id,
             previous_chronograph_section_id,
-            new_section_name,
         )
 
         LOGGER.info("Finished copying chronograph for %s/%s", month_number, year_suffix)

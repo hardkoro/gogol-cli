@@ -22,12 +22,12 @@ app = typer.Typer()
 @app.command()
 def pin(
     database_uri: Annotated[str, typer.Option(help="Database URI", envvar="DATABASE_URI")],
-    event_url: Annotated[str, typer.Argument(help="Event URL")],
+    event_urls: Annotated[list[str], typer.Argument(help="Event URLs")],
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
 ) -> None:
-    """Pin the event."""
+    """Pin the event(s)."""
     uvloop.install()
-    asyncio.run(run_pin_event(database_uri, event_url, dry_run))
+    asyncio.run(run_pin_event(database_uri, event_urls, dry_run))
 
 
 @app.command()
