@@ -22,8 +22,7 @@ gogol-cli = "gogol_cli.__main__:cli"
 
 [dependency-groups]
 dev = [
-    "mypy==1.11.2",
-    "pylint==3.3.1",
+    "ty==0.0.26",
     "ruff==0.6.9",
 ]
 
@@ -64,8 +63,8 @@ indent-width = 4
 target-version = "py310"
 
 [tool.ruff.lint]
-# Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
-select = ["E4", "E7", "E9", "F"]
+# Enable Pyflakes (`F`), pycodestyle (`E`), and Pylint (`PL`) rules.
+select = ["E4", "E7", "E9", "F", "PLC", "PLE", "PLR", "PLW"]
 ignore = []
 
 # Allow fix for all enabled rules (when `--fix`) is provided.
@@ -88,13 +87,5 @@ skip-magic-trailing-comma = false
 # Like Black, automatically detect the appropriate line ending.
 line-ending = "auto"
 
-[tool.pylint]
+[tool.ruff.lint.pylint]
 max-args = 10
-min-public-methods = 0
-
-[tool.mypy]
-# Specify the directories to include for type checking.
-exclude = ["migrations"]
-
-[tool.pylint.'DESIGN']
-max-positional-arguments = 10

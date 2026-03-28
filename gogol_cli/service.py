@@ -17,6 +17,7 @@ class GogolCLIService:
     """Gogol CLI service."""
 
     YEAR_REPEAT = 5
+    DECEMBER = 12
 
     MONTH_NUMBERS_TO_NAMES: dict[int, str] = {
         1: "Январь",
@@ -95,8 +96,10 @@ class GogolCLIService:
 
         return statistics
 
-    @staticmethod
-    def _get_start_and_end_dates(month_number: int, year_suffix: str) -> tuple[datetime, datetime]:
+    @classmethod
+    def _get_start_and_end_dates(
+        cls, month_number: int, year_suffix: str
+    ) -> tuple[datetime, datetime]:
         """Get start and end dates for monthly statistics."""
         full_year = f"20{year_suffix}"
 
@@ -104,7 +107,7 @@ class GogolCLIService:
         start_date = datetime.strptime(f"{full_year}-{month_number}-01", DATE_FORMAT)
 
         # Calculate the first day of the next month
-        if month_number == 12:  # If December, next month is January of the next year
+        if month_number == cls.DECEMBER:  # If December, next month is January of the next year
             next_month_start_date = datetime.strptime(f"{int(full_year) + 1}-01-01", DATE_FORMAT)
         else:
             next_month_start_date = datetime.strptime(
