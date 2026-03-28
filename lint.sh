@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # Run ruff
-poetry run ruff format .
-poetry run ruff check .
+uv run ruff format .
+uv run ruff check .
 
 # Run pylint
-poetry run pylint gogol_cli
+uv run pylint gogol_cli
 
 # Run mypy
-poetry run mypy gogol_cli
+uv run mypy gogol_cli

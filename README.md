@@ -4,10 +4,10 @@ The script is the CLI to manipulate the Gogol House database.
 
 ## Installation
 
-Install project dependencies using Poetry:
+Install project dependencies using uv:
 
 ```shell
-poetry install
+uv sync
 ```
 
 ## Run the script
@@ -36,31 +36,31 @@ echo TO_ADDRS=to_addrs > .env
 Show help message:
 
 ```shell
-poetry run python -m gogol_cli --help
+uv run python -m gogol_cli --help
 ```
 
 Pin event:
 
 ```shell
-poetry run python -m gogol_cli pin <event-url> --dry-run
+uv run python -m gogol_cli pin <event-url> --dry-run
 ```
 
 Copy event to the new date:
 
 ```shell
-poetry run python -m gogol_cli copy <event-url> <new-event-date-str> <new-event-time-str> --new-price <new-price> --dry-run
+uv run python -m gogol_cli copy <event-url> <new-event-date-str> <new-event-time-str> --new-price <new-price> --dry-run
 ```
 
 Export monthly statistics: 
 
 ```shell
-poetry run python -m gogol_cli export <month-number> <year-suffix> --dry-run
+uv run python -m gogol_cli export <month-number> <year-suffix> --dry-run
 ```
 
 Copy chronograph entries:
 
 ```shell
-poetry run python -m gogol_cli chrono <month-number> <year-suffix> --dry-run
+uv run python -m gogol_cli chrono <month-number> <year-suffix> --dry-run
 ```
 
 ## Development
@@ -68,7 +68,7 @@ poetry run python -m gogol_cli chrono <month-number> <year-suffix> --dry-run
 To lint the project run the following command to execute the linting script:
 
 ```shell
-poetry run ./lint.sh
+uv run ./lint.sh
 ```
 
 ## Known Issues

@@ -1,32 +1,35 @@
-[tool.poetry]
+[project]
 name = "gogol-cli"
 version = "0.1.0"
 description = "Gogol CLI"
-authors = ["Evgenii Korobkov <eug.korobkov@gmail.com>"]
+authors = [
+    {name = "Evgenii Korobkov", email = "eug.korobkov@gmail.com"}
+]
 readme = "README.md"
+requires-python = "==3.11.1"
+dependencies = [
+    "aiomysql==0.3.0",
+    "diagrams==0.23.4",
+    "pydantic==2.9.2",
+    "python-dotenv==1.0.1",
+    "sqlalchemy==2.0.35",
+    "typer==0.12.5",
+    "uvloop==0.20.0",
+]
 
-[tool.poetry.dependencies]
-python = "==3.11.1"
-
-aiomysql = "==0.3.0"
-diagrams = "==0.23.4"
-pydantic = "==2.9.2"
-python-dotenv = "==1.0.1"
-sqlalchemy = "==2.0.35"
-typer = "==0.12.5"
-uvloop = "==0.20.0"
-
-[tool.poetry.group.dev.dependencies]
-mypy = "==1.11.2"
-pylint = "==3.3.1"
-ruff = "==0.6.9"
-
-[tool.poetry.scripts]
+[project.scripts]
 gogol-cli = "gogol_cli.__main__:cli"
 
+[dependency-groups]
+dev = [
+    "mypy==1.11.2",
+    "pylint==3.3.1",
+    "ruff==0.6.9",
+]
+
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.
