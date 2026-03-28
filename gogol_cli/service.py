@@ -42,7 +42,7 @@ class GogolCLIService:
         LOGGER.info("Getting event from %s ...", event_url)
 
         # Remove query parameters if present
-        url_without_query = event_url.split('?')[0]
+        url_without_query = event_url.split("?")[0]
 
         event_id_match = re.search(r"/(\d+)/?$", url_without_query)
         if event_id_match is None:

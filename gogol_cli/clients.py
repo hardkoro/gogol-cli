@@ -38,6 +38,9 @@ class DatabaseClient:
     EVENT_DATE_PROPERTY_ID = 15
     EVENT_PRICE_PROPERTY_ID = 129
 
+    CHRONOGRAPH_IBLOCK_ID = 8
+    CHRONOGRAPH_YEAR_PROPERTY_ID = 23
+
     def __init__(self, database_uri: str, dry_run: bool) -> None:
         """Initialize the client."""
         self._engine = create_async_engine(database_uri, echo=True)
@@ -142,6 +145,9 @@ class DatabaseClient:
 
     async def _copy_picture(self, session: AsyncSession, picture_id: int | None) -> int:
         """Copy picture."""
+        if picture_id is None:
+            raise ValueError("Cannot copy picture: picture_id is None")
+
         query = f"""
             INSERT INTO b_file(timestamp_x, module_id, height, width, file_size, content_type, subdir, file_name, original_name, description, handler_id, external_id)
             SELECT timestamp_x, module_id, height, width, file_size, content_type, subdir, file_name, original_name, description, handler_id, external_id
@@ -150,15 +156,7 @@ class DatabaseClient:
         """
         await session.execute(text(query))
 
-        query = """
-            SELECT MAX(id) AS `id`
-            FROM b_file;
-        """
-
-        preview_picture_query = await self._query(query)
-        preview_picture_id = preview_picture_query[0]["id"]
-
-        return int(preview_picture_id)
+        return await self._get_last_insert_id(session)
 
     async def _pin_event(
         self, session: AsyncSession, event: Event, preview_picture_id: int
@@ -173,14 +171,7 @@ class DatabaseClient:
         """
         await session.execute(text(query))
 
-        query = """
-            SELECT MAX(id) AS `id`
-            FROM b_iblock_element;
-        """
-        events = await self._query(query)
-        event_id = events[0]["id"]
-
-        return int(event_id)
+        return await self._get_last_insert_id(session)
 
     async def _copy_event(  # pylint: disable=too-many-locals
         self,
@@ -191,10 +182,9 @@ class DatabaseClient:
         new_event_date: datetime,
         new_event_time: str,
     ) -> int:
-        """Pin event."""
+        """Copy event."""
         now = datetime.now(tz=None).strftime(DATETIME_FORMAT)
         user = self.DEFAULT_USER_ID
-
         hours, minutes = new_event_time.split("-")
         active_to_datetime = new_event_date + timedelta(hours=int(hours) + 1, minutes=int(minutes))
         active_to = active_to_datetime.strftime(DATETIME_FORMAT)
@@ -205,14 +195,7 @@ class DatabaseClient:
         """
         await session.execute(text(query))
 
-        query = """
-            SELECT MAX(id) AS `id`
-            FROM b_iblock_element;
-        """
-        events = await self._query(query)
-        event_id = events[0]["id"]
-
-        return int(event_id)
+        return await self._get_last_insert_id(session)
 
     async def _set_properties(
         self,
@@ -320,8 +303,8 @@ class DatabaseClient:
 
         LOGGER.info("Finished copying event %s to %s", old_event.id, new_event_date)
 
+    @staticmethod
     async def _add_element_to_section(
-        self,
         session: AsyncSession,
         element_id: int,
         section_id: int,
@@ -382,7 +365,7 @@ class DatabaseClient:
         async with self._session_maker() as session:
             query = f"""
                 INSERT INTO b_iblock_section(timestamp_x, modified_by, date_create, created_by, iblock_id, iblock_section_id, active, global_active, sort, name, picture, depth_level, searchable_content, tmp_id, detail_picture, socnet_group_id)
-                VALUES (NOW(), 1, NOW(), 1, 8, NULL, 'Y', 'Y', 500, '{section_name}', NULL, 1, '{section_name.upper()}', 0, NULL, NULL);
+                VALUES (NOW(), 1, NOW(), 1, {self.CHRONOGRAPH_IBLOCK_ID}, NULL, 'Y', 'Y', 500, '{section_name}', NULL, 1, '{section_name.upper()}', 0, NULL, NULL);
             """
             await session.execute(text(query))
 
@@ -442,7 +425,7 @@ class DatabaseClient:
                     UPDATE b_iblock_element_property
                     SET value = value + 5
                     WHERE iblock_element_id = {element_id}
-                      AND iblock_property_id = 23;
+                      AND iblock_property_id = {self.CHRONOGRAPH_YEAR_PROPERTY_ID};
                 """
                 await session.execute(text(query))
 
@@ -472,3 +455,9 @@ class DatabaseClient:
         affected_elements = await self._query(query)
 
         return [element["id"] for element in affected_elements]
+
+    @staticmethod
+    async def _get_last_insert_id(session: AsyncSession) -> int:
+        """Get the last inserted row ID."""
+        result = await session.execute(text("SELECT LAST_INSERT_ID();"))
+        return int(result.scalar_one())
