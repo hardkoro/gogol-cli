@@ -1,10 +1,12 @@
-"""Schemas for SMTP Exporter."""
+"""Schemas for the SMTP exporter."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class SMTPConfig(BaseModel):
     """SMTP connection config."""
+
+    model_config = ConfigDict(frozen=True)
 
     host: str
     port: int
@@ -14,6 +16,8 @@ class SMTPConfig(BaseModel):
 
 class EmailConfig(BaseModel):
     """Email config."""
+
+    model_config = ConfigDict(frozen=True)
 
     from_addr: str
     to_addr: str

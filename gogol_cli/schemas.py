@@ -1,7 +1,7 @@
 """Schemas."""
 
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Event(BaseModel):
@@ -38,14 +38,16 @@ class Event(BaseModel):
 class File(BaseModel):
     """File schema."""
 
-    id: int
-    timestamp: datetime
-    module_id: str
-    height: int
-    width: int
-    file_size: int
-    content_type: str
-    subdir: str
-    file_name: str
-    original_name: str | None
-    external_id: str | None
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: int = Field(alias="ID")
+    timestamp: datetime = Field(alias="TIMESTAMP_X")
+    module_id: str = Field(alias="MODULE_ID")
+    height: int = Field(alias="HEIGHT")
+    width: int = Field(alias="WIDTH")
+    file_size: int = Field(alias="FILE_SIZE")
+    content_type: str = Field(alias="CONTENT_TYPE")
+    subdir: str = Field(alias="SUBDIR")
+    file_name: str = Field(alias="FILE_NAME")
+    original_name: str | None = Field(alias="ORIGINAL_NAME")
+    external_id: str | None = Field(alias="EXTERNAL_ID")

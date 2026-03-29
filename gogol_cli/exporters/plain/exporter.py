@@ -12,7 +12,11 @@ class PlainExporter(AbstractExporter):
     """Plain exporter."""
 
     def export(self, statistics: list[dict[str, int]]) -> None:
-        """Pretty print statistics."""
+        """Print the statistics report to stdout.
+
+        Args:
+            statistics: A list of dicts with ``what`` and ``cnt`` keys.
+        """
         LOGGER.info("Pretty printing statistics ...")
 
         message = self.prepare_message(statistics)

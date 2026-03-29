@@ -32,7 +32,14 @@ class AbstractExporter(ABC):
     )
 
     def prepare_message(self, statistics: list[dict[str, int]]) -> str:
-        """Prepare message."""
+        """Format the statistics into a human-readable report body.
+
+        Args:
+            statistics: A list of dicts with ``what`` and ``cnt`` keys.
+
+        Returns:
+            The formatted message string ready to send or print.
+        """
         pages_added = 0
         files_added = 0
         pages_updated = 0
@@ -59,4 +66,8 @@ class AbstractExporter(ABC):
 
     @abstractmethod
     def export(self, statistics: list[dict[str, int]]) -> None:
-        """Export."""
+        """Send or output the statistics report.
+
+        Args:
+            statistics: A list of dicts with ``what`` and ``cnt`` keys.
+        """
