@@ -13,6 +13,10 @@ class EventNotFoundError(GogolCLIException):
     """Event not found error."""
 
 
+class FileNotFoundError(GogolCLIException):
+    """File not found error."""
+
+
 class InvalidEventURLError(GogolCLIException):
     """Invalid event URL error."""
 

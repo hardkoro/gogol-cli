@@ -33,3 +33,19 @@ class Event(BaseModel):
     def active_to_minutes(self) -> str:
         """Get active to minutes."""
         return self.active_to.strftime("%M")
+
+
+class File(BaseModel):
+    """File schema."""
+
+    id: int
+    timestamp: datetime
+    module_id: str
+    height: int
+    width: int
+    file_size: int
+    content_type: str
+    subdir: str
+    file_name: str
+    original_name: str | None
+    external_id: str | None

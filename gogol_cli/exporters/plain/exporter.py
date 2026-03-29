@@ -2,7 +2,7 @@
 
 import logging
 
-from gogol_cli.exporters.base import AbstractExporter
+from gogol_cli.exporters.base_exporter import AbstractExporter
 
 
 LOGGER = logging.getLogger(__name__)

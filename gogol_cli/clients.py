@@ -3,11 +3,13 @@
 from itertools import count
 from datetime import datetime, timedelta
 import logging
+from uuid import uuid4
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine, AsyncSession
 
-from gogol_cli.schemas import Event
+from gogol_cli.schemas import Event, File
+from gogol_cli.ssh_file_manager import SSHFileManager
 from gogol_cli.exceptions import EventNotFoundError
 
 DATE_FORMAT = "%d.%m.%Y"
@@ -41,10 +43,18 @@ class DatabaseClient:
     CHRONOGRAPH_IBLOCK_ID = 8
     CHRONOGRAPH_YEAR_PROPERTY_ID = 23
 
-    def __init__(self, database_uri: str, dry_run: bool) -> None:
+    def __init__(
+        self,
+        ssh_file_manager: SSHFileManager,
+        database_uri: str,
+        dry_run: bool,
+    ) -> None:
         """Initialize the client."""
+        self._ssh_file_manager = ssh_file_manager
+
         self._engine = create_async_engine(database_uri, echo=True)
         self._session_maker = async_sessionmaker(self._engine)
+
         self._dry_run = dry_run
 
     async def _query(self, query: str) -> list[dict]:
@@ -148,13 +158,27 @@ class DatabaseClient:
         if picture_id is None:
             raise ValueError("Cannot copy picture: picture_id is None")
 
-        query = f"""
-            INSERT INTO b_file(timestamp_x, module_id, height, width, file_size, content_type, subdir, file_name, original_name, description, handler_id, external_id)
-            SELECT timestamp_x, module_id, height, width, file_size, content_type, subdir, file_name, original_name, description, handler_id, external_id
-            FROM b_file
-            WHERE id = '{picture_id}';
-        """
-        await session.execute(text(query))
+        # A: Determine old file
+        old_file = await self._get_file_by_id(session, picture_id)
+
+        # B: Generate new unique subdir
+        new_subdir = self._generate_new_subdir()
+
+        # C: Copy physical file
+        await self._ssh_file_manager.copy_file(old_file, new_subdir)
+
+        # D. Insert new `b_file` record
+        query = text(
+            """
+                 INSERT INTO b_file(timestamp_x, module_id, height, width, file_size, content_type, subdir,
+                                    file_name, original_name, description, handler_id, external_id)
+                 SELECT timestamp_x, module_id, height, width, file_size, content_type, :subdir,
+                        file_name, original_name, description, handler_id, external_id
+                 FROM b_file
+                 WHERE id = :id
+            """
+        )
+        await session.execute(query, {"subdir": new_subdir, "id": picture_id})
 
         return await self._get_last_insert_id(session)
 
@@ -461,3 +485,35 @@ class DatabaseClient:
         """Get the last inserted row ID."""
         result = await session.execute(text("SELECT LAST_INSERT_ID();"))
         return int(result.scalar_one())
+
+    @staticmethod
+    async def _get_file_by_id(session: AsyncSession, file_id: int) -> File:
+        """Get file by id."""
+        query = text("SELECT * FROM b_file WHERE ID = :file_id")
+        result = await session.execute(query, {"file_id": file_id})
+        row = result.mappings().fetchone()
+
+        if not row:
+            LOGGER.info("File %s not found", file_id)
+            raise FileNotFoundError(f"File ID {file_id} not found")
+
+        return File(
+            id=row["ID"],
+            timestamp=row["TIMESTAMP_X"],
+            module_id=row["MODULE_ID"],
+            height=row["HEIGHT"],
+            width=row["WIDTH"],
+            file_size=row["FILE_SIZE"],
+            content_type=row["CONTENT_TYPE"],
+            subdir=row["SUBDIR"],
+            file_name=row["FILE_NAME"],
+            original_name=row["ORIGINAL_NAME"],
+            external_id=row["EXTERNAL_ID"],
+        )
+
+    @staticmethod
+    def _generate_new_subdir() -> str:
+        """Generate new subdir."""
+        file_hash = uuid4().hex
+        subdir = f"iblock/{file_hash[:3]}/{file_hash[3:6]}/{file_hash}"
+        return subdir
