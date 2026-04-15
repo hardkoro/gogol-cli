@@ -2,21 +2,20 @@
 
 import asyncio
 import logging
-
+from datetime import datetime, timedelta
 from typing import Annotated
 
 import typer
 import uvloop
-
 from dotenv import load_dotenv
 
-from gogol_cli.runner import pin_event as run_pin_event
-from gogol_cli.runner import copy_event as run_copy_event
-from gogol_cli.runner import export_statistics as run_export
+from gogol_cli.exporters.smtp import EmailConfig, SMTPConfig
 from gogol_cli.runner import copy_chronograph as run_chronograph
+from gogol_cli.runner import copy_event as run_copy_event
+from gogol_cli.runner import create_exhibition as run_create_exhibition
+from gogol_cli.runner import export_statistics as run_export
+from gogol_cli.runner import pin_event as run_pin_event
 from gogol_cli.ssh_file_manager import SSHConfig
-from gogol_cli.exporters.smtp import SMTPConfig, EmailConfig
-
 
 load_dotenv()
 
@@ -36,7 +35,10 @@ def pin(
     """Pin the event(s)."""
     uvloop.install()
     ssh_config = SSHConfig(
-        host=ssh_host, username=ssh_username, key_path=ssh_key_path, base_path=ssh_base_path
+        host=ssh_host,
+        username=ssh_username,
+        key_path=ssh_key_path,
+        base_path=ssh_base_path,
     )
     asyncio.run(run_pin_event(database_uri, event_urls, dry_run, ssh_config))
 
@@ -51,13 +53,16 @@ def copy(
     ssh_username: Annotated[str, typer.Option(help="SSH username", envvar="SSH_USERNAME")],
     ssh_key_path: Annotated[str, typer.Option(help="SSH key path", envvar="SSH_KEY_PATH")],
     ssh_base_path: Annotated[str, typer.Option(help="SSH base path", envvar="SSH_BASE_PATH")],
-    new_price: Annotated[str, typer.Option(help="New event price (100–300)")] | None = None,
+    new_price: (Annotated[str, typer.Option(help="New event price (100–300)")] | None) = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
 ) -> None:
     """Copy the event."""
     uvloop.install()
     ssh_config = SSHConfig(
-        host=ssh_host, username=ssh_username, key_path=ssh_key_path, base_path=ssh_base_path
+        host=ssh_host,
+        username=ssh_username,
+        key_path=ssh_key_path,
+        base_path=ssh_base_path,
     )
     asyncio.run(
         run_copy_event(
@@ -114,6 +119,41 @@ def chrono(
     """Run the chronograph."""
     uvloop.install()
     asyncio.run(run_chronograph(database_uri, month_number, year_suffix, dry_run))
+
+
+@app.command()
+def exhibition(
+    database_uri: Annotated[str, typer.Option(help="Database URI", envvar="DATABASE_URI")],
+    folder: Annotated[str, typer.Argument(help="Path to the folder with exhibition .docx files")],
+    ssh_host: Annotated[str, typer.Option(help="SSH host", envvar="SSH_HOST")],
+    ssh_username: Annotated[str, typer.Option(help="SSH username", envvar="SSH_USERNAME")],
+    ssh_key_path: Annotated[str, typer.Option(help="SSH key path", envvar="SSH_KEY_PATH")],
+    ssh_base_path: Annotated[str, typer.Option(help="SSH base path", envvar="SSH_BASE_PATH")],
+    active_from_str: Annotated[
+        str | None,
+        typer.Option(
+            "--active-from",
+            help="Active from datetime (YYYY-MM-DD HH:MM:SS). Default: yesterday 15:00.",
+        ),
+    ] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
+) -> None:
+    """Create an exhibition and its books from a folder of .docx files."""
+    uvloop.install()
+
+    if active_from_str is not None:
+        active_from = datetime.strptime(active_from_str, "%Y-%m-%d %H:%M:%S")
+    else:
+        yesterday = datetime.now().date() - timedelta(days=1)
+        active_from = datetime(yesterday.year, yesterday.month, yesterday.day, 15, 0, 0)
+
+    ssh_config = SSHConfig(
+        host=ssh_host,
+        username=ssh_username,
+        key_path=ssh_key_path,
+        base_path=ssh_base_path,
+    )
+    asyncio.run(run_create_exhibition(database_uri, folder, active_from, dry_run, ssh_config))
 
 
 if __name__ == "__main__":

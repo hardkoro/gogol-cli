@@ -40,6 +40,24 @@ CHRONOGRAPH_DEFAULT_SORT = 500
 CHRONOGRAPH_YEAR_PROPERTY_ID = 23
 CHRONOGRAPH_YEAR_OFFSET = 5  # years between source and destination sections
 
+# --- Exhibition iblock -----------------------------------------------------------
+
+EXHIBITION_IBLOCK_ID = 14
+EXHIBITION_DEFAULT_SORT = 500
+EXHIBITION_SECTION_PROPERTY_ID = 47
+EXHIBITION_DATE_PROPERTY_ID = 211
+
+# --- Book iblock -----------------------------------------------------------------
+
+BOOK_IBLOCK_ID = 9
+BOOK_DEFAULT_SORT = 500
+
+BOOK_FULL_BIB_PROPERTY_ID = 30
+BOOK_AUTHOR_PROPERTY_ID = 31
+BOOK_CITY_PROPERTY_ID = 57
+BOOK_PUBLISHER_PROPERTY_ID = 58
+BOOK_YEAR_PROPERTY_ID = 59
+
 # --- Calendar --------------------------------------------------------------------
 
 DECEMBER = 12

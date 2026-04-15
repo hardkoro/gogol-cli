@@ -1,17 +1,18 @@
 """Gogol CLI service."""
 
-from datetime import datetime
+import io
 import logging
 import re
+from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gogol_cli.clients import DatabaseClient
 from gogol_cli import constants as const
-from gogol_cli.schemas import Event
+from gogol_cli.clients import DatabaseClient
 from gogol_cli.exceptions import GogolCLIException, SSHNotConfiguredError
+from gogol_cli.exhibition.schemas import ParsedExhibition
+from gogol_cli.schemas import Event
 from gogol_cli.ssh_file_manager import SSHFileManager
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -211,3 +212,133 @@ class GogolCLIService:
                 await session.commit()
 
         LOGGER.info("Finished copying chronograph for %s/%s", month_number, year_suffix)
+
+    async def create_exhibition(
+        self,
+        parsed: ParsedExhibition,
+        active_from: datetime,
+    ) -> None:
+        """Create an exhibition and its books from parsed docx data.
+
+        Uploads cover images via SSH, inserts file records, creates a section
+        for books, inserts the exhibition element and one book element per book,
+        and sets the bibliographic properties on each book.
+
+        Args:
+            parsed: The exhibition data produced by ``parse_exhibition_folder``.
+            active_from: The ``active_from`` datetime to set on all created elements.
+        """
+        from PIL import Image
+
+        LOGGER.info("Creating exhibition '%s' ...", parsed.title)
+
+        async with self._db.session() as session:
+            if not self._dry_run and self._ssh is None:
+                raise SSHNotConfiguredError(
+                    "An SSH file manager is required to upload images " "but was not provided."
+                )
+
+            ssh = self._ssh
+
+            # --- Illustration ---
+            illus_subdir = self._db.generate_new_subdir()
+            if not self._dry_run:
+                assert ssh is not None
+                await ssh.upload_file(
+                    parsed.illustration_data, illus_subdir, parsed.illustration_filename
+                )
+            with Image.open(io.BytesIO(parsed.illustration_data)) as img:
+                illus_w, illus_h = img.width, img.height
+            illus_ct = _content_type(parsed.illustration_filename)
+            illus_file_id = await self._db.insert_new_file(
+                session,
+                illus_subdir,
+                parsed.illustration_filename,
+                illus_ct,
+                illus_w,
+                illus_h,
+                len(parsed.illustration_data),
+            )
+
+            # --- Book section (created first so we have section_id for properties) ---
+            section_id = await self._db.insert_book_section(session, parsed.title)
+
+            # --- Exhibition element ---
+            exhibition_id = await self._db.insert_exhibition_element(
+                session,
+                title=parsed.title,
+                preview_text=parsed.preview_text,
+                detail_text=parsed.detail_text,
+                preview_picture_id=illus_file_id,
+                detail_picture_id=illus_file_id,
+                active_from=active_from,
+            )
+            await self._db.set_exhibition_properties(
+                session, exhibition_id, section_id, active_from
+            )
+
+            # --- Books ---
+            for book in parsed.books:
+                cover_subdir = self._db.generate_new_subdir()
+                if not self._dry_run:
+                    assert ssh is not None
+                    await ssh.upload_file(book.cover_data, cover_subdir, book.cover_filename)
+                with Image.open(io.BytesIO(book.cover_data)) as img:
+                    cover_w, cover_h = img.width, img.height
+                cover_ct = _content_type(book.cover_filename)
+                cover_file_id = await self._db.insert_new_file(
+                    session,
+                    cover_subdir,
+                    book.cover_filename,
+                    cover_ct,
+                    cover_w,
+                    cover_h,
+                    len(book.cover_data),
+                )
+                book_id = await self._db.insert_book_element(
+                    session,
+                    title=book.bib.title,
+                    section_id=section_id,
+                    preview_text=book.preview_text,
+                    detail_text=book.description,
+                    preview_picture_id=cover_file_id,
+                    detail_picture_id=cover_file_id,
+                    active_from=active_from,
+                    sort=book.sort,
+                )
+                await self._db.set_book_properties(
+                    session,
+                    book_id=book_id,
+                    full_bib_text=_php_serialize_bib(book.bib.full_text),
+                    author=book.bib.author,
+                    city=book.bib.city,
+                    publisher=book.bib.publisher,
+                    year=book.bib.year,
+                )
+
+            if not self._dry_run:
+                await session.commit()
+
+        LOGGER.info(
+            "Finished creating exhibition '%s' (id=%d, books=%d)",
+            parsed.title,
+            exhibition_id,
+            len(parsed.books),
+        )
+
+
+def _content_type(filename: str) -> str:
+    ext = filename.rsplit(".", 1)[-1].lower()
+    return {
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "png": "image/png",
+        "gif": "image/gif",
+        "webp": "image/webp",
+    }.get(ext, "application/octet-stream")
+
+
+def _php_serialize_bib(text: str) -> str:
+    """Serialise a bib string to the PHP ``a:2:{...}`` format stored in prop 30."""
+    byte_len = len(text.encode("utf-8"))
+    return f'a:2:{{s:4:"TEXT";s:{byte_len}:"{text}";s:4:"TYPE";s:4:"HTML";}}'

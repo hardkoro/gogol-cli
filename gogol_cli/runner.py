@@ -1,8 +1,10 @@
 """Script run."""
 
+from datetime import datetime
+
 from gogol_cli.clients import DatabaseClient
-from gogol_cli.exceptions import SMTPConfigError, EmailConfigError
-from gogol_cli.exporters import AbstractExporter, SMTPExporter, PlainExporter
+from gogol_cli.exceptions import EmailConfigError, SMTPConfigError
+from gogol_cli.exporters import AbstractExporter, PlainExporter, SMTPExporter
 from gogol_cli.exporters.smtp import EmailConfig, SMTPConfig
 from gogol_cli.service import GogolCLIService
 from gogol_cli.ssh_file_manager import SSHConfig, SSHFileManager
@@ -79,3 +81,22 @@ async def copy_chronograph(
     cli_service = GogolCLIService(database_client, dry_run=dry_run)
 
     await cli_service.copy_chronograph(month_number, year_suffix)
+
+
+async def create_exhibition(
+    database_uri: str,
+    folder_path: str,
+    active_from: datetime,
+    dry_run: bool,
+    ssh_config: SSHConfig,
+) -> None:
+    """Run the exhibition creation script."""
+    from gogol_cli.exhibition.docx_parser import parse_exhibition_folder
+
+    parsed = parse_exhibition_folder(folder_path)
+
+    database_client = DatabaseClient(database_uri)
+    ssh_file_manager = SSHFileManager(ssh_config)
+    cli_service = GogolCLIService(database_client, ssh_file_manager, dry_run)
+
+    await cli_service.create_exhibition(parsed, active_from)

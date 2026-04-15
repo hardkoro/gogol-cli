@@ -25,19 +25,19 @@ Copy `.env.example` and populate it:
 cp .env.example .env
 ```
 
-| Variable | Description | Required |
-|---|---|---|
-| `DATABASE_URI` | SQLAlchemy async DB URI | ✅ always |
-| `SSH_HOST` | Remote server IP / hostname | ✅ always |
-| `SSH_USERNAME` | SSH login username | ✅ always |
-| `SSH_KEY_PATH` | Path to private SSH key | ✅ always |
-| `SSH_BASE_PATH` | Absolute upload path on the server | ✅ always |
-| `SMTP_HOST` | SMTP server hostname | ✅ `export` (non-dry) |
-| `SMTP_PORT` | SMTP server port | ✅ `export` (non-dry) |
-| `SMTP_USERNAME` | SMTP login | ✅ `export` (non-dry) |
-| `SMTP_PASSWORD` | SMTP password | ✅ `export` (non-dry) |
-| `FROM_ADDR` | Sender email address | ✅ `export` (non-dry) |
-| `TO_ADDR` | Recipient email address | ✅ `export` (non-dry) |
+| Variable        | Description                        | Required              |
+| --------------- | ---------------------------------- | --------------------- |
+| `DATABASE_URI`  | SQLAlchemy async DB URI            | ✅ always             |
+| `SSH_HOST`      | Remote server IP / hostname        | ✅ always             |
+| `SSH_USERNAME`  | SSH login username                 | ✅ always             |
+| `SSH_KEY_PATH`  | Path to private SSH key            | ✅ always             |
+| `SSH_BASE_PATH` | Absolute upload path on the server | ✅ always             |
+| `SMTP_HOST`     | SMTP server hostname               | ✅ `export` (non-dry) |
+| `SMTP_PORT`     | SMTP server port                   | ✅ `export` (non-dry) |
+| `SMTP_USERNAME` | SMTP login                         | ✅ `export` (non-dry) |
+| `SMTP_PASSWORD` | SMTP password                      | ✅ `export` (non-dry) |
+| `FROM_ADDR`     | Sender email address               | ✅ `export` (non-dry) |
+| `TO_ADDR`       | Recipient email address            | ✅ `export` (non-dry) |
 
 ## Usage
 
@@ -71,6 +71,22 @@ Copy chronograph entries:
 uv run --env-file .env python -m gogol_cli chrono <month-number> <year-suffix> [--dry-run]
 ```
 
+Create an exhibition from a folder of `.docx` files:
+
+```shell
+uv run --env-file .env python -m gogol_cli exhibition <folder> [--active-from "YYYY-MM-DD HH:MM:SS"] [--dry-run]
+```
+
+The folder must contain:
+
+- `1. <name>.docx` — exhibition title and description
+- `2. <name>.docx` … `N. <name>.docx` — book files (cover image, bibliographic line, description)
+- One unnumbered `.docx` — illustration used as the exhibition cover image
+
+The command parses the files interactively: it prompts you to confirm or edit the exhibition title and the bibliographic fields (title, author, city, publisher, year) for each book before writing anything to the database.
+
+`--active-from` defaults to yesterday at 15:00:00 if not provided.
+
 ## Shell alias
 
 Add the following to `~/.zshrc` to use `gogol` as a short alias from anywhere:
@@ -93,6 +109,7 @@ gogol pin <event-url>
 gogol copy <event-url> <new-date> <new-time>
 gogol export <month-number> <year-suffix>
 gogol chrono <month-number> <year-suffix>
+gogol exhibition <folder>
 ```
 
 ## Development
