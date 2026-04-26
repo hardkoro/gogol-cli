@@ -1,5 +1,7 @@
 """Parse exhibition data from a folder of .docx files."""
 
+from __future__ import annotations
+
 import os
 import re
 import zipfile
@@ -114,8 +116,14 @@ def _is_author_line(text: str) -> bool:
 def _parse_bib(author_line: str | None, bib_line: str) -> BibInfo:
     bib = bib_line.strip()
 
-    # Year: first 4-digit number in plausible range
-    year_match = re.search(r"\b(1[89]\d{2}|20\d{2})\b", bib)
+    # Year: prefer the year in `. - City : Publisher, Year` position,
+    # which avoids picking up date ranges embedded in titles (e.g. 1941-1945).
+    year_match = re.search(
+        r"\.\s*-\s*[^:\n]+:\s*[^,\n]+,\s*(1[89]\d{2}|20\d{2})\b",
+        bib,
+    )
+    if not year_match:
+        year_match = re.search(r"\b(1[89]\d{2}|20\d{2})\b", bib)
     year = year_match.group(1) if year_match else ""
 
     # City and publisher: `. - CITY : PUBLISHER`
@@ -154,7 +162,7 @@ def _prompt_title(title: str) -> str:
 
 def _prompt_bib(bib: BibInfo, book_index: int) -> BibInfo:
     typer.echo(f"\n--- Book {book_index} ---")
-    typer.echo(f"  Bib line: {bib.full_text[:100]}")
+    typer.echo(f"  Bib line: {bib.full_text}")
     title = typer.prompt("  Title (element name)", default=bib.title)
     author = typer.prompt("  Author (prop 31)", default=bib.author)
     city = typer.prompt("  City abbreviation (prop 57)", default=bib.city)
@@ -320,7 +328,9 @@ def parse_exhibition_folder(folder_path: str) -> ParsedExhibition:
     Displays interactive prompts so the user can confirm or correct the
     parsed exhibition title and per-book bibliographic fields.
     """
-    all_docx = [f for f in os.listdir(folder_path) if f.endswith(".docx")]
+    all_docx = [
+        f for f in os.listdir(folder_path) if f.endswith(".docx") and not f.startswith("~$")
+    ]
 
     numbered = sorted(
         (f for f in all_docx if f[0].isdigit()),
