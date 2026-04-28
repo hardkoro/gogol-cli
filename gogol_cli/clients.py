@@ -1,6 +1,7 @@
 """Clients."""
 
 import logging
+import re
 from datetime import datetime, timedelta
 from itertools import count
 from uuid import uuid4
@@ -252,9 +253,24 @@ class DatabaseClient:
         """
         now = datetime.now(tz=None).strftime(const.DATETIME_FORMAT)
         hours, minutes = new_event_time.split("-")
+        active_from = now
         active_to = (
             new_event_date + timedelta(hours=int(hours) + 1, minutes=int(minutes))
         ).strftime(const.DATETIME_FORMAT)
+
+        def _strip_html(s: str | None) -> str:
+            return re.sub(r"<[^>]+>", " ", s or "")
+
+        searchable_content = " ".join(
+            filter(
+                None,
+                [
+                    event.name,
+                    _strip_html(event.preview_text),
+                    _strip_html(event.detail_text),
+                ],
+            )
+        ).upper()
 
         await session.execute(
             text(
@@ -264,14 +280,14 @@ class DatabaseClient:
                     iblock_id, iblock_section_id, active, active_from, active_to,
                     sort, name, preview_picture, preview_text, preview_text_type,
                     detail_picture, detail_text, detail_text_type,
-                    searchable_content, tags, tmp_id
+                    searchable_content, tags, tmp_id, code
                 )
                 VALUES (
                     :now, :user, :now, :user,
-                    :iblock_id, :section_id, 'Y', :now, :active_to,
+                    :iblock_id, NULL, 'Y', :active_from, :active_to,
                     :sort, :name, :preview_picture, :preview_text, :preview_text_type,
                     :detail_picture, :detail_text, :detail_text_type,
-                    :searchable_content, :tags, 0
+                    :searchable_content, :tags, 0, ''
                 )
             """
             ),
@@ -279,7 +295,7 @@ class DatabaseClient:
                 "now": now,
                 "user": const.DEFAULT_USER_ID,
                 "iblock_id": const.EVENT_IBLOCK_ID,
-                "section_id": const.EVENT_IBLOCK_SECTION_ID,
+                "active_from": active_from,
                 "active_to": active_to,
                 "sort": const.EVENT_DEFAULT_SORT,
                 "name": event.name,
@@ -289,11 +305,61 @@ class DatabaseClient:
                 "detail_picture": detail_picture_id,
                 "detail_text": event.detail_text,
                 "detail_text_type": event.detail_text_type,
-                "searchable_content": event.name.upper(),
+                "searchable_content": searchable_content,
                 "tags": event.tags,
             },
         )
-        return await DatabaseClient._get_last_insert_id(session)
+        new_event_id = await DatabaseClient._get_last_insert_id(session)
+
+        # Insert b_search_content so the calendar filter picks up the new event
+        url = (
+            f"=ID={new_event_id}&EXTERNAL_ID={new_event_id}"
+            f"&IBLOCK_SECTION_ID={const.EVENT_IBLOCK_SECTION_ID}"
+            f"&IBLOCK_TYPE_ID={const.EVENT_IBLOCK_TYPE_ID}"
+            f"&IBLOCK_ID={const.EVENT_IBLOCK_ID}"
+            f"&IBLOCK_CODE={const.EVENT_IBLOCK_CODE}"
+            f"&IBLOCK_EXTERNAL_ID={const.EVENT_IBLOCK_EXTERNAL_ID}"
+            f"&CODE="
+        )
+        body = " ".join(
+            filter(
+                None,
+                [
+                    _strip_html(event.preview_text),
+                    _strip_html(event.detail_text),
+                ],
+            )
+        )
+        await session.execute(
+            text(
+                """
+                INSERT INTO b_search_content (
+                    date_change, module_id, item_id, custom_rank,
+                    url, title, body, tags, param1, param2,
+                    date_from, date_to
+                )
+                VALUES (
+                    :now, 'iblock', :item_id, 0,
+                    :url, :title, :body, :tags, :param1, :param2,
+                    :date_from, :date_to
+                )
+            """
+            ),
+            {
+                "now": now,
+                "item_id": str(new_event_id),
+                "url": url,
+                "title": event.name,
+                "body": body,
+                "tags": event.tags,
+                "param1": const.EVENT_IBLOCK_TYPE_ID,
+                "param2": str(const.EVENT_IBLOCK_ID),
+                "date_from": active_from,
+                "date_to": active_to,
+            },
+        )
+
+        return new_event_id
 
     @staticmethod
     async def set_event_properties(
@@ -322,8 +388,8 @@ class DatabaseClient:
             text(
                 """
                 INSERT INTO b_iblock_element_property
-                    (iblock_property_id, iblock_element_id, value, value_type, value_num)
-                SELECT iblock_property_id, :new_id, value, value_type, value_num
+                    (iblock_property_id, iblock_element_id, value, value_type, value_enum, value_num, description)
+                SELECT iblock_property_id, :new_id, value, value_type, value_enum, value_num, description
                 FROM b_iblock_element_property
                 WHERE iblock_element_id = :old_id
             """
@@ -355,7 +421,7 @@ class DatabaseClient:
             """
             ),
             {
-                "date_value": new_event_date.strftime(const.EVENT_DATE_DISPLAY_FORMAT),
+                "date_value": new_event_date.strftime(const.DATETIME_FORMAT),
                 "event_id": new_event_id,
                 "prop_id": const.EVENT_DATE_PROPERTY_ID,
             },
