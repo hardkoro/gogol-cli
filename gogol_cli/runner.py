@@ -100,3 +100,21 @@ async def create_exhibition(
     cli_service = GogolCLIService(database_client, ssh_file_manager, dry_run)
 
     await cli_service.create_exhibition(parsed, active_from)
+
+
+async def create_virtual_exhibition(
+    database_uri: str,
+    folder_path: str,
+    dry_run: bool,
+    ssh_config: SSHConfig,
+) -> None:
+    """Run the virtual exhibition creation script."""
+    from gogol_cli.virtual_exhibition.parser import parse_virtual_exhibition_folder
+
+    parsed = parse_virtual_exhibition_folder(folder_path)
+
+    database_client = DatabaseClient(database_uri)
+    ssh_file_manager = SSHFileManager(ssh_config)
+    cli_service = GogolCLIService(database_client, ssh_file_manager, dry_run)
+
+    await cli_service.create_virtual_exhibition(parsed)

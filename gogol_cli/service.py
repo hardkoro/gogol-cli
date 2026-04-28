@@ -3,7 +3,7 @@
 import io
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,7 @@ from gogol_cli.exceptions import GogolCLIException, SSHNotConfiguredError
 from gogol_cli.exhibition.schemas import ParsedExhibition
 from gogol_cli.schemas import Event
 from gogol_cli.ssh_file_manager import SSHFileManager
+from gogol_cli.virtual_exhibition.schemas import ParsedVirtualExhibition
 
 LOGGER = logging.getLogger(__name__)
 
@@ -326,6 +327,114 @@ class GogolCLIService:
             len(parsed.books),
         )
 
+    async def create_virtual_exhibition(
+        self,
+        parsed: ParsedVirtualExhibition,
+    ) -> None:
+        """Create a virtual exhibition and upload its images via SSH.
+
+        Resizes images whose largest dimension exceeds the configured maximum,
+        uploads each image to the remote server, inserts file records in the
+        database, and stores the exhibition element together with all item
+        properties.
+
+        Args:
+            parsed: The virtual exhibition data produced by
+                ``parse_virtual_exhibition_folder``.
+        """
+        LOGGER.info("Creating virtual exhibition '%s' …", parsed.title)
+
+        async with self._db.session() as session:
+            if not self._dry_run and self._ssh is None:
+                raise SSHNotConfiguredError(
+                    "An SSH file manager is required to upload images but was not provided."
+                )
+
+            ssh = self._ssh
+
+            # ── Preview / detail image ───────────────────────────────────────
+            preview_data, preview_w, preview_h = _resize_image(
+                parsed.preview_image_data, const.VIRTUAL_EXHIBITION_MAX_IMAGE_DIM
+            )
+            preview_subdir = self._db.generate_new_subdir()
+            if not self._dry_run:
+                assert ssh is not None
+                await ssh.upload_file(preview_data, preview_subdir, parsed.preview_image_filename)
+            preview_ct = _content_type(parsed.preview_image_filename)
+            preview_file_id = await self._db.insert_new_file(
+                session,
+                preview_subdir,
+                parsed.preview_image_filename,
+                preview_ct,
+                preview_w,
+                preview_h,
+                len(preview_data),
+            )
+
+            # ── Exhibition element ───────────────────────────────────────────
+            # The element is active from today until one day after the display end date.
+            element_active_from = datetime.today()
+            element_active_to = parsed.active_to + timedelta(days=1)
+            exhibition_id = await self._db.insert_virtual_exhibition_element(
+                session,
+                title=parsed.title,
+                preview_text=parsed.preview_text,
+                detail_text=parsed.detail_text,
+                preview_picture_id=preview_file_id,
+                detail_picture_id=preview_file_id,
+                active_from=element_active_from,
+                active_to=element_active_to,
+            )
+            await self._db.set_virtual_exhibition_properties(
+                session,
+                element_id=exhibition_id,
+                subtitle=parsed.subtitle,
+                active_from=parsed.active_from,
+                active_to=parsed.active_to,
+            )
+
+            # ── Items ────────────────────────────────────────────────────────
+            for item in parsed.items:
+                image_file_ids: list[int] = []
+                for img_data, img_filename in item.images:
+                    resized_data, img_w, img_h = _resize_image(
+                        img_data, const.VIRTUAL_EXHIBITION_MAX_IMAGE_DIM
+                    )
+                    img_subdir = self._db.generate_new_subdir()
+                    if not self._dry_run:
+                        assert ssh is not None
+                        await ssh.upload_file(resized_data, img_subdir, img_filename)
+                    img_ct = _content_type(img_filename)
+                    file_id = await self._db.insert_new_file(
+                        session,
+                        img_subdir,
+                        img_filename,
+                        img_ct,
+                        img_w,
+                        img_h,
+                        len(resized_data),
+                    )
+                    image_file_ids.append(file_id)
+
+                await self._db.insert_virtual_exhibition_item(
+                    session,
+                    exhibition_id=exhibition_id,
+                    name=item.name,
+                    bib_html=_php_serialize_html(item.bib_text),
+                    description_html=_php_serialize_html(item.description),
+                    image_file_ids=image_file_ids,
+                )
+
+            if not self._dry_run:
+                await session.commit()
+
+        LOGGER.info(
+            "Finished creating virtual exhibition '%s' (id=%d, items=%d)",
+            parsed.title,
+            exhibition_id,
+            len(parsed.items),
+        )
+
 
 def _content_type(filename: str) -> str:
     ext = filename.rsplit(".", 1)[-1].lower()
@@ -342,3 +451,31 @@ def _php_serialize_bib(text: str) -> str:
     """Serialise a bib string to the PHP ``a:2:{...}`` format stored in prop 30."""
     byte_len = len(text.encode("utf-8"))
     return f'a:2:{{s:4:"TEXT";s:{byte_len}:"{text}";s:4:"TYPE";s:4:"HTML";}}'
+
+
+def _php_serialize_html(text: str) -> str:
+    """Serialise an HTML string to the PHP ``a:2:{...}`` format stored in item props."""
+    byte_len = len(text.encode("utf-8"))
+    return f'a:2:{{s:4:"TEXT";s:{byte_len}:"{text}";s:4:"TYPE";s:4:"HTML";}}'
+
+
+def _resize_image(data: bytes, max_dim: int) -> tuple[bytes, int, int]:
+    """Resize *data* so the largest dimension does not exceed *max_dim*.
+
+    Returns:
+        (resized_bytes, width, height)  – original bytes if no resize needed.
+    """
+    from PIL import Image
+
+    with Image.open(io.BytesIO(data)) as img:
+        orig_format = img.format or "JPEG"
+        w, h = img.width, img.height
+        if max(w, h) <= max_dim:
+            return data, w, h
+        ratio = max_dim / max(w, h)
+        new_w = max(1, int(w * ratio))
+        new_h = max(1, int(h * ratio))
+        resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        resized.save(buf, format=orig_format, quality=90)
+        return buf.getvalue(), new_w, new_h

@@ -74,7 +74,7 @@ uv run --env-file .env python -m gogol_cli chrono <month-number> <year-suffix> [
 Create an exhibition from a folder of `.docx` files:
 
 ```shell
-uv run --env-file .env python -m gogol_cli exhibition <folder> [--active-from "YYYY-MM-DD HH:MM:SS"] [--dry-run]
+uv run --env-file .env python -m gogol_cli exhibit <folder> [--active-from "YYYY-MM-DD HH:MM:SS"] [--dry-run]
 ```
 
 The folder must contain:
@@ -86,6 +86,14 @@ The folder must contain:
 The command parses the files interactively: it prompts you to confirm or edit the exhibition title and the bibliographic fields (title, author, city, publisher, year) for each book before writing anything to the database.
 
 `--active-from` defaults to yesterday at 15:00:00 if not provided.
+
+Create a virtual exhibition from a folder containing a `.doc`/`.docx` file and images:
+
+```shell
+uv run --env-file .env python -m gogol_cli virtual <folder> [--dry-run]
+```
+
+The folder must contain a single `.doc` or `.docx` file (exhibition description) and any number of image files. КП-numbered images (e.g. `КП-123.jpg`) are matched to exhibition items; the first unnumbered image is used as the exhibition preview.
 
 ## Shell alias
 
@@ -109,7 +117,8 @@ gogol pin <event-url>
 gogol copy <event-url> <new-date> <new-time>
 gogol export <month-number> <year-suffix>
 gogol chrono <month-number> <year-suffix>
-gogol exhibition <folder>
+gogol exhibit <folder>
+gogol virtual <folder>
 ```
 
 ## Development

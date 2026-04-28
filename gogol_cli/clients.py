@@ -925,3 +925,309 @@ class DatabaseClient:
         """
         file_hash = uuid4().hex
         return f"iblock/{file_hash[:3]}/{file_hash[3:6]}/{file_hash}"
+
+    @staticmethod
+    async def insert_virtual_exhibition_element(
+        session: AsyncSession,
+        title: str,
+        preview_text: str,
+        detail_text: str,
+        preview_picture_id: int,
+        detail_picture_id: int,
+        active_from: datetime,
+        active_to: datetime,
+    ) -> int:
+        """Insert a new virtual exhibition element in iblock 5.
+
+        Args:
+            session: The active database session.
+            title: The exhibition title (element name).
+            preview_text: HTML preview text.
+            detail_text: HTML detail text.
+            preview_picture_id: File ID for the preview picture.
+            detail_picture_id: File ID for the detail picture.
+            active_from: The start date of the exhibition.
+            active_to: The end date of the exhibition (exclusive, element active_to).
+
+        Returns:
+            The ID of the newly inserted element.
+        """
+        active_from_str = active_from.strftime(const.DATETIME_FORMAT)
+        active_to_str = active_to.strftime(const.DATETIME_FORMAT)
+        await session.execute(
+            text(
+                """
+                INSERT INTO b_iblock_element (
+                    timestamp_x, modified_by, date_create, created_by,
+                    iblock_id, iblock_section_id, active, active_from, active_to,
+                    sort, name, preview_picture, preview_text, preview_text_type,
+                    detail_picture, detail_text, detail_text_type,
+                    searchable_content, tmp_id
+                ) VALUES (
+                    NOW(), :user, NOW(), :user,
+                    :iblock_id, :section_id, 'Y', :active_from, :active_to,
+                    :sort, :name, :preview_picture, :preview_text, 'html',
+                    :detail_picture, :detail_text, 'html',
+                    :searchable_content, 0
+                )
+            """
+            ),
+            {
+                "user": const.DEFAULT_USER_ID,
+                "iblock_id": const.VIRTUAL_EXHIBITION_IBLOCK_ID,
+                "section_id": const.VIRTUAL_EXHIBITION_IBLOCK_SECTION_ID,
+                "active_from": active_from_str,
+                "active_to": active_to_str,
+                "sort": const.VIRTUAL_EXHIBITION_DEFAULT_SORT,
+                "name": title,
+                "preview_picture": preview_picture_id,
+                "preview_text": preview_text,
+                "detail_picture": detail_picture_id,
+                "detail_text": detail_text,
+                "searchable_content": title.upper(),
+            },
+        )
+        element_id = await DatabaseClient._get_last_insert_id(session)
+        await session.execute(
+            text("UPDATE b_iblock_element SET xml_id = :id WHERE id = :id"),
+            {"id": element_id},
+        )
+        return element_id
+
+    @staticmethod
+    async def set_virtual_exhibition_properties(
+        session: AsyncSession,
+        element_id: int,
+        subtitle: str,
+        active_from: datetime,
+        active_to: datetime,
+    ) -> None:
+        """Set fixed and date properties on a virtual exhibition element.
+
+        Inserts props 9 (type), 54 (active_from), 55 (active_to), 66 (sort=0),
+        196 (subtitle), and 213 (category link).
+
+        Args:
+            session: The active database session.
+            element_id: The ID of the virtual exhibition element.
+            subtitle: The subtitle text (prop 196).
+            active_from: The start date for props 54.
+            active_to: The display end date for prop 55 (one day before element active_to).
+        """
+        from_str = active_from.strftime("%Y-%m-%d 00:00:00")
+        to_str = active_to.strftime("%Y-%m-%d 00:00:00")
+        from_year = float(active_from.year)
+        to_year = float(active_to.year)
+
+        await session.execute(
+            text(
+                """
+                INSERT INTO b_iblock_element_property
+                    (iblock_property_id, iblock_element_id, value,
+                     value_type, value_enum, value_num, description)
+                VALUES
+                    (:prop9,   :id, :val9,     'text', :enum9,   NULL,      NULL),
+                    (:prop54,  :id, :from_str, 'text', NULL,     :from_year, NULL),
+                    (:prop55,  :id, :to_str,   'text', NULL,     :to_year,   NULL),
+                    (:prop66,  :id, '0',       'text', NULL,     0.0,        NULL),
+                    (:prop196, :id, :subtitle, 'text', NULL,     0.0,        NULL),
+                    (:prop213, :id, :val213,   'text', :enum213, NULL,       NULL)
+            """
+            ),
+            {
+                "prop9": const.VIRTUAL_EXHIBITION_PROP_TYPE_ID,
+                "val9": str(const.VIRTUAL_EXHIBITION_PROP_TYPE_VALUE),
+                "enum9": const.VIRTUAL_EXHIBITION_PROP_TYPE_VALUE,
+                "prop54": const.VIRTUAL_EXHIBITION_PROP_ACTIVE_FROM_ID,
+                "from_str": from_str,
+                "from_year": from_year,
+                "prop55": const.VIRTUAL_EXHIBITION_PROP_ACTIVE_TO_ID,
+                "to_str": to_str,
+                "to_year": to_year,
+                "prop66": const.VIRTUAL_EXHIBITION_PROP_SORT_ID,
+                "prop196": const.VIRTUAL_EXHIBITION_PROP_SUBTITLE_ID,
+                "subtitle": subtitle,
+                "prop213": const.VIRTUAL_EXHIBITION_PROP_CATEGORY_ID,
+                "val213": str(const.VIRTUAL_EXHIBITION_PROP_CATEGORY_VALUE),
+                "enum213": const.VIRTUAL_EXHIBITION_PROP_CATEGORY_VALUE,
+                "id": element_id,
+            },
+        )
+
+    @staticmethod
+    async def insert_virtual_exhibition_item(
+        session: AsyncSession,
+        exhibition_id: int,
+        name: str,
+        bib_html: str,
+        description_html: str,
+        image_file_ids: list[int],
+    ) -> None:
+        """Insert all properties for one virtual exhibition item.
+
+        Inserts props 197 (name), 198 (bib), 199 (description), 200 (image file IDs),
+        and 205 (linking array), all sharing the same ``scp_<id>`` description key.
+
+        The scp key is derived from the LAST_INSERT_ID after inserting prop 197.
+
+        Args:
+            session: The active database session.
+            exhibition_id: The ID of the parent virtual exhibition element.
+            name: The item title (prop 197).
+            bib_html: PHP-serialised bib HTML (prop 198).
+            description_html: PHP-serialised description HTML (prop 199).
+            image_file_ids: File IDs for the item images (prop 200, one row per image).
+        """
+        # Insert prop 197 (name) and derive the scp key from its ID
+        await session.execute(
+            text(
+                """
+                INSERT INTO b_iblock_element_property
+                    (iblock_property_id, iblock_element_id, value,
+                     value_type, value_enum, value_num, description)
+                VALUES (:prop197, :eid, :name, 'text', NULL, 0.0, NULL)
+            """
+            ),
+            {
+                "prop197": const.VIRTUAL_EXHIBITION_PROP_ITEM_NAME_ID,
+                "eid": exhibition_id,
+                "name": name,
+            },
+        )
+        prop197_id = await DatabaseClient._get_last_insert_id(session)
+        scp_key = f"scp_{prop197_id}"
+
+        # Update the scp key on prop 197
+        await session.execute(
+            text("UPDATE b_iblock_element_property SET description = :scp WHERE id = :pid"),
+            {"scp": scp_key, "pid": prop197_id},
+        )
+
+        # Insert prop 198 (bib info)
+        await session.execute(
+            text(
+                """
+                INSERT INTO b_iblock_element_property
+                    (iblock_property_id, iblock_element_id, value,
+                     value_type, value_enum, value_num, description)
+                VALUES (:prop198, :eid, :bib, 'text', NULL, 0.0, :scp)
+            """
+            ),
+            {
+                "prop198": const.VIRTUAL_EXHIBITION_PROP_ITEM_BIB_ID,
+                "eid": exhibition_id,
+                "bib": bib_html,
+                "scp": scp_key,
+            },
+        )
+        prop198_id = await DatabaseClient._get_last_insert_id(session)
+
+        # Insert prop 199 (description)
+        await session.execute(
+            text(
+                """
+                INSERT INTO b_iblock_element_property
+                    (iblock_property_id, iblock_element_id, value,
+                     value_type, value_enum, value_num, description)
+                VALUES (:prop199, :eid, :desc, 'text', NULL, 0.0, :scp)
+            """
+            ),
+            {
+                "prop199": const.VIRTUAL_EXHIBITION_PROP_ITEM_DESC_ID,
+                "eid": exhibition_id,
+                "desc": description_html,
+                "scp": scp_key,
+            },
+        )
+        prop199_id = await DatabaseClient._get_last_insert_id(session)
+
+        # Insert prop 200 (image file IDs — one row per image)
+        prop200_ids: list[int] = []
+        for file_id in image_file_ids:
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO b_iblock_element_property
+                        (iblock_property_id, iblock_element_id, value,
+                         value_type, value_enum, value_num, description)
+                    VALUES (:prop200, :eid, :fid, 'text', NULL, :fnum, :scp)
+                """
+                ),
+                {
+                    "prop200": const.VIRTUAL_EXHIBITION_PROP_ITEM_IMAGE_ID,
+                    "eid": exhibition_id,
+                    "fid": str(file_id),
+                    "fnum": float(file_id),
+                    "scp": scp_key,
+                },
+            )
+            prop200_ids.append(await DatabaseClient._get_last_insert_id(session))
+
+        # Build and insert prop 205 (linking array)
+        link_value = _php_serialize_item_link(
+            exhibition_id=exhibition_id,
+            scp_key=scp_key,
+            prop197_id=prop197_id,
+            prop198_id=prop198_id,
+            prop199_id=prop199_id,
+            prop200_ids=prop200_ids,
+            image_file_ids=image_file_ids,
+        )
+        await session.execute(
+            text(
+                """
+                INSERT INTO b_iblock_element_property
+                    (iblock_property_id, iblock_element_id, value,
+                     value_type, value_enum, value_num, description)
+                VALUES (:prop205, :eid, :val, 'text', 0, 0.0, :scp)
+            """
+            ),
+            {
+                "prop205": const.VIRTUAL_EXHIBITION_PROP_ITEM_LINK_ID,
+                "eid": exhibition_id,
+                "val": link_value,
+                "scp": scp_key,
+            },
+        )
+
+
+def _php_serialize_item_link(
+    exhibition_id: int,
+    scp_key: str,
+    prop197_id: int,
+    prop198_id: int,
+    prop199_id: int,
+    prop200_ids: list[int],
+    image_file_ids: list[int],
+) -> str:
+    """Build the PHP-serialised prop 205 linking array for one virtual exhibition item.
+
+    The format mirrors what Bitrix CMS stores for composite property groups::
+
+        a:1:{i:<elem_id>;a:4:{i:197;a:1:{i:<id>;s:<len>:"scp_X";}...}}
+
+    For prop 200 the inner value is the file ID string, not the scp key.
+    """
+    scp_bytes = scp_key.encode("utf-8")
+    scp_len = len(scp_bytes)
+    scp_s = f's:{scp_len}:"{scp_key}"'
+
+    def _prop_entry_scp(prop_id: int, record_ids: list[int]) -> str:
+        inner = "".join(f"i:{rid};{scp_s};" for rid in record_ids)
+        return f"i:{prop_id};a:{len(record_ids)}:{{{inner}}}"
+
+    def _prop_entry_file(prop_id: int, row_ids: list[int], file_ids: list[int]) -> str:
+        parts = []
+        for row_id, file_id in zip(row_ids, file_ids):
+            fid_str = str(file_id)
+            parts.append(f'i:{row_id};s:{len(fid_str)}:"{fid_str}";')
+        return f"i:{prop_id};a:{len(row_ids)}:{{{''.join(parts)}}}"
+
+    entries = [
+        _prop_entry_scp(197, [prop197_id]),
+        _prop_entry_scp(198, [prop198_id]),
+        _prop_entry_scp(199, [prop199_id]),
+        _prop_entry_file(200, prop200_ids, image_file_ids),
+    ]
+    inner = "".join(entries)
+    return f"a:1:{{i:{exhibition_id};a:{len(entries)}:{{{inner}}}}}"

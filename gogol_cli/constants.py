@@ -58,6 +58,34 @@ BOOK_CITY_PROPERTY_ID = 57
 BOOK_PUBLISHER_PROPERTY_ID = 58
 BOOK_YEAR_PROPERTY_ID = 59
 
+# --- Virtual exhibition iblock ---------------------------------------------------
+
+VIRTUAL_EXHIBITION_IBLOCK_ID = 5
+VIRTUAL_EXHIBITION_IBLOCK_SECTION_ID = 283
+VIRTUAL_EXHIBITION_DEFAULT_SORT = 500
+
+# Properties on the exhibition element
+VIRTUAL_EXHIBITION_PROP_TYPE_ID = 9  # iblock type (enum list)
+VIRTUAL_EXHIBITION_PROP_TYPE_VALUE = 61  # value_enum for prop 9
+VIRTUAL_EXHIBITION_PROP_ACTIVE_FROM_ID = 54
+VIRTUAL_EXHIBITION_PROP_ACTIVE_TO_ID = 55
+VIRTUAL_EXHIBITION_PROP_SORT_ID = 66
+VIRTUAL_EXHIBITION_PROP_SUBTITLE_ID = 196  # short sub-header text
+
+# Per-item property IDs (linked by scp_XXXX description key)
+VIRTUAL_EXHIBITION_PROP_ITEM_NAME_ID = 197
+VIRTUAL_EXHIBITION_PROP_ITEM_BIB_ID = 198
+VIRTUAL_EXHIBITION_PROP_ITEM_DESC_ID = 199
+VIRTUAL_EXHIBITION_PROP_ITEM_IMAGE_ID = 200
+VIRTUAL_EXHIBITION_PROP_ITEM_LINK_ID = 205  # PHP-serialised linking array
+
+# Category / section link property
+VIRTUAL_EXHIBITION_PROP_CATEGORY_ID = 213
+VIRTUAL_EXHIBITION_PROP_CATEGORY_VALUE = 120  # value_enum for prop 213
+
+# Image resizing
+VIRTUAL_EXHIBITION_MAX_IMAGE_DIM = 1280
+
 # --- Calendar --------------------------------------------------------------------
 
 DECEMBER = 12

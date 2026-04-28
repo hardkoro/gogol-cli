@@ -13,6 +13,7 @@ from gogol_cli.exporters.smtp import EmailConfig, SMTPConfig
 from gogol_cli.runner import copy_chronograph as run_chronograph
 from gogol_cli.runner import copy_event as run_copy_event
 from gogol_cli.runner import create_exhibition as run_create_exhibition
+from gogol_cli.runner import create_virtual_exhibition as run_create_virtual_exhibition
 from gogol_cli.runner import export_statistics as run_export
 from gogol_cli.runner import pin_event as run_pin_event
 from gogol_cli.ssh_file_manager import SSHConfig
@@ -122,7 +123,7 @@ def chrono(
 
 
 @app.command()
-def exhibition(
+def exhibit(
     database_uri: Annotated[str, typer.Option(help="Database URI", envvar="DATABASE_URI")],
     folder: Annotated[str, typer.Argument(help="Path to the folder with exhibition .docx files")],
     ssh_host: Annotated[str, typer.Option(help="SSH host", envvar="SSH_HOST")],
@@ -154,6 +155,38 @@ def exhibition(
         base_path=ssh_base_path,
     )
     asyncio.run(run_create_exhibition(database_uri, folder, active_from, dry_run, ssh_config))
+
+
+@app.command()
+def virtual(
+    database_uri: Annotated[str, typer.Option(help="Database URI", envvar="DATABASE_URI")],
+    folder: Annotated[
+        str,
+        typer.Argument(help="Path to the folder with the exhibition .doc/.docx and images"),
+    ],
+    ssh_host: Annotated[str, typer.Option(help="SSH host", envvar="SSH_HOST")],
+    ssh_username: Annotated[str, typer.Option(help="SSH username", envvar="SSH_USERNAME")],
+    ssh_key_path: Annotated[str, typer.Option(help="SSH key path", envvar="SSH_KEY_PATH")],
+    ssh_base_path: Annotated[str, typer.Option(help="SSH base path", envvar="SSH_BASE_PATH")],
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
+) -> None:
+    """Create a virtual exhibition from a folder containing a .doc/.docx file and images."""
+    uvloop.install()
+    ssh_config = SSHConfig(
+        host=ssh_host,
+        username=ssh_username,
+        key_path=ssh_key_path,
+        base_path=ssh_base_path,
+    )
+    asyncio.run(run_create_virtual_exhibition(database_uri, folder, dry_run, ssh_config))
+
+
+@app.command()
+def help(ctx: typer.Context) -> None:
+    """Show this help message."""
+    parent = ctx.parent
+    if parent is not None:
+        print(parent.get_help())
 
 
 if __name__ == "__main__":
