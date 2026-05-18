@@ -3,7 +3,7 @@
 import io
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +16,107 @@ from gogol_cli.ssh_file_manager import SSHFileManager
 from gogol_cli.virtual_exhibition.schemas import ParsedVirtualExhibition
 
 LOGGER = logging.getLogger(__name__)
+
+_RUSSIAN_MONTHS: dict[str, int] = {
+    "января": 1,
+    "февраля": 2,
+    "марта": 3,
+    "апреля": 4,
+    "мая": 5,
+    "июня": 6,
+    "июля": 7,
+    "августа": 8,
+    "сентября": 9,
+    "октября": 10,
+    "ноября": 11,
+    "декабря": 12,
+}
+
+
+def _parse_date_time_line(ln: str, month_pattern: str, today: date) -> list[tuple[date, str]]:
+    """Parse a single date/time line into (date, time_str) pairs.
+
+    Returns an empty list if the line is not a valid date/time line.
+    """
+    month_match = re.search(month_pattern, ln)
+    if month_match is None:
+        return []
+    month = _RUSSIAN_MONTHS[month_match.group(0)]
+
+    clean = re.sub(r"https?://\S+", "", ln).strip()
+    split_match = re.search(r"\s+в\s+", clean)
+    if split_match is None:
+        return []
+    days_part = clean[: split_match.start()]
+    time_part = clean[split_match.end() :]
+
+    days = [int(d) for d in re.findall(r"\d+", days_part)]
+    if not days:
+        return []
+
+    times: list[str] = []
+    for tm in re.finditer(r"\d{1,2}(?::(\d{2}))?", time_part):
+        hour = int(tm.group(0).split(":")[0])
+        minutes = tm.group(1) or "00"
+        times.append(f"{hour:02d}-{minutes}")
+    if not times:
+        return []
+
+    result: list[tuple[date, str]] = []
+    for day in days:
+        for time_str in times:
+            candidate = date(today.year, month, day)
+            if candidate < today:
+                candidate = date(today.year + 1, month, day)
+            result.append((candidate, time_str))
+    return result
+
+
+def parse_xcopy_text(text: str) -> tuple[str, list[tuple[date, str]]]:
+    """Parse a natural language copy instruction into a URL and (date, time) pairs.
+
+    The text is split into lines. Lines containing a Russian month name and a
+    time spec (``в HH`` or ``в HH:MM``) are treated as date/time lines; all
+    other lines (titles, keyword lines, etc.) are silently ignored.
+
+    Each date/time line may produce multiple copies:
+
+    - Multiple days: ``3, 17 и 24 июня в 19:00`` → three copies
+    - Multiple times: ``24 мая в 14 и 16`` → two copies at 14:00 and 16:00
+    - Multiple lines: each line becomes its own group
+
+    Multi-line input should be passed as a single quoted shell argument
+    (e.g. ``$'URL\\n8 мая в 16:00\\n15, 22, 29 мая в 17:00'``).
+
+    Args:
+        text: The instruction text (may contain embedded newlines).
+
+    Returns:
+        Tuple of ``(url, date_times)`` where ``date_times`` is a list of
+        ``(date, time_str)`` pairs and ``time_str`` is in ``HH-MM`` format.
+    """
+    lines = [ln.strip() for ln in text.splitlines()]
+    lines = [ln for ln in lines if ln]
+
+    url: str | None = None
+    for ln in lines:
+        url_match = re.search(r"https?://\S+", ln)
+        if url_match:
+            url = url_match.group(0).split("?")[0]
+            break
+    if url is None:
+        raise GogolCLIException(f"No URL found in: {text!r}")
+
+    month_pattern = "|".join(_RUSSIAN_MONTHS)
+    today = datetime.now().date()
+    date_times: list[tuple[date, str]] = []
+    for ln in lines:
+        date_times.extend(_parse_date_time_line(ln, month_pattern, today))
+
+    if not date_times:
+        raise GogolCLIException(f"No date/time groups found in: {text!r}")
+
+    return url, date_times
 
 
 class GogolCLIService:

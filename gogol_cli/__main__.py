@@ -16,6 +16,8 @@ from gogol_cli.runner import create_exhibition as run_create_exhibition
 from gogol_cli.runner import create_virtual_exhibition as run_create_virtual_exhibition
 from gogol_cli.runner import export_statistics as run_export
 from gogol_cli.runner import pin_event as run_pin_event
+from gogol_cli.runner import xcopy_event as run_xcopy_event
+from gogol_cli.service import parse_xcopy_text
 from gogol_cli.ssh_file_manager import SSHConfig
 
 load_dotenv()
@@ -120,6 +122,31 @@ def chrono(
     """Run the chronograph."""
     uvloop.install()
     asyncio.run(run_chronograph(database_uri, month_number, year_suffix, dry_run))
+
+
+@app.command()
+def xcopy(
+    database_uri: Annotated[str, typer.Option(help="Database URI", envvar="DATABASE_URI")],
+    text: Annotated[
+        list[str],
+        typer.Argument(help="URL + Russian date/time (e.g. URL на 11 июня в 19:00)"),
+    ],
+    ssh_host: Annotated[str, typer.Option(help="SSH host", envvar="SSH_HOST")],
+    ssh_username: Annotated[str, typer.Option(help="SSH username", envvar="SSH_USERNAME")],
+    ssh_key_path: Annotated[str, typer.Option(help="SSH key path", envvar="SSH_KEY_PATH")],
+    ssh_base_path: Annotated[str, typer.Option(help="SSH base path", envvar="SSH_BASE_PATH")],
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
+) -> None:
+    """Copy event(s) using natural language date specification."""
+    url, date_times = parse_xcopy_text(" ".join(text))
+    uvloop.install()
+    ssh_config = SSHConfig(
+        host=ssh_host,
+        username=ssh_username,
+        key_path=ssh_key_path,
+        base_path=ssh_base_path,
+    )
+    asyncio.run(run_xcopy_event(database_uri, url, date_times, dry_run, ssh_config))
 
 
 @app.command()

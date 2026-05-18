@@ -1,6 +1,6 @@
 """Script run."""
 
-from datetime import datetime
+from datetime import date, datetime
 
 from gogol_cli.clients import DatabaseClient
 from gogol_cli.exceptions import EmailConfigError, SMTPConfigError
@@ -42,6 +42,23 @@ async def copy_event(
 
     old_event = await cli_service.get_event(event_url)
     await cli_service.copy_event(old_event, new_event_date_str, new_event_time_str, new_price)
+
+
+async def xcopy_event(
+    database_uri: str,
+    url: str,
+    date_times: list[tuple[date, str]],
+    dry_run: bool,
+    ssh_config: SSHConfig,
+) -> None:
+    """Copy an event to multiple dates from a natural language instruction."""
+    database_client = DatabaseClient(database_uri)
+    ssh_file_manager = SSHFileManager(ssh_config)
+    cli_service = GogolCLIService(database_client, ssh_file_manager, dry_run)
+
+    old_event = await cli_service.get_event(url)
+    for d, time_str in date_times:
+        await cli_service.copy_event(old_event, d.strftime("%Y-%m-%d"), time_str, None)
 
 
 async def export_statistics(

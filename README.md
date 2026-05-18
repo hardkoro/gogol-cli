@@ -59,6 +59,30 @@ Copy event to a new date:
 uv run --env-file .env python -m gogol_cli copy <event-url> <new-date> <new-time> [--new-price <price>] [--dry-run]
 ```
 
+Copy event(s) using natural language (Russian) date specification:
+
+```shell
+uv run --env-file .env python -m gogol_cli xcopy <text> [--dry-run]
+```
+
+`<text>` is a single quoted string containing the event URL and one or more date/time lines in Russian. Lines that contain a Russian month name and a time are parsed as copy targets; all other lines (titles, keywords) are ignored. Examples:
+
+```
+# Single date and time
+gogol xcopy 'https://www.domgogolya.ru/recital/21100/ на 11 июня в 19:00'
+
+# Multiple days, same time
+gogol xcopy 'https://www.domgogolya.ru/recital/21200/ на 3, 17 и 24 июня в 18:00'
+
+# Two times on the same date (creates two copies)
+gogol xcopy 'https://www.domgogolya.ru/recital/21218/ на 24 мая в 14 и 16'
+
+# Multiple date/time groups on separate lines (use $'...' for newlines in zsh)
+gogol xcopy $'https://www.domgogolya.ru/recital/21196/ продублируй на\n7, 14, 21, 28 мая в 19:00\n2, 23 и 30 мая в 16:00'
+```
+
+URL query parameters (e.g. `?sphrase_id=…`) are automatically stripped — no quoting needed when using the `gogol` shell alias.
+
 Export monthly statistics:
 
 ```shell
@@ -115,6 +139,7 @@ After that, all commands shorten to:
 ```shell
 gogol pin <event-url>
 gogol copy <event-url> <new-date> <new-time>
+gogol xcopy '<url> на <день> <месяц> в <время>'
 gogol export <month-number> <year-suffix>
 gogol chrono <month-number> <year-suffix>
 gogol exhibit <folder>
