@@ -62,23 +62,29 @@ uv run --env-file .env python -m gogol_cli copy <event-url> <new-date> <new-time
 Copy event(s) using natural language (Russian) date specification:
 
 ```shell
-uv run --env-file .env python -m gogol_cli xcopy <text> [--dry-run]
+uv run --env-file .env python -m gogol_cli xcopy [--dry-run]
 ```
 
-`<text>` is a single quoted string containing the event URL and one or more date/time lines in Russian. Lines that contain a Russian month name and a time are parsed as copy targets; all other lines (titles, keywords) are ignored. Examples:
+`xcopy` runs in interactive mode: paste one or more free-form blocks, then press `Ctrl-D`.
+
+Each block must contain one event URL and one or more date/time lines in Russian. Lines that contain a Russian month name and a time are parsed as copy targets; all other lines (titles, keywords) are ignored.
+
+Use an empty line between blocks if you paste multiple events at once.
+
+Example:
 
 ```
-# Single date and time
-gogol xcopy 'https://www.domgogolya.ru/recital/21100/ на 11 июня в 19:00'
+gogol xcopy
+Продублируй
+«Детство и юность Н.В. Гоголя»
+7, 14, 28 июня в 14:00
+6, 13, 20, 27 июня в 13:00
+https://www.domgogolya.ru/recital/21342/
 
-# Multiple days, same time
-gogol xcopy 'https://www.domgogolya.ru/recital/21200/ на 3, 17 и 24 июня в 18:00'
+https://www.domgogolya.ru/recital/21425/
+3, 10, 17, 24 июня в 15:00
 
-# Two times on the same date (creates two copies)
-gogol xcopy 'https://www.domgogolya.ru/recital/21218/ на 24 мая в 14 и 16'
-
-# Multiple date/time groups on separate lines (use $'...' for newlines in zsh)
-gogol xcopy $'https://www.domgogolya.ru/recital/21196/ продублируй на\n7, 14, 21, 28 мая в 19:00\n2, 23 и 30 мая в 16:00'
+<Ctrl-D>
 ```
 
 URL query parameters (e.g. `?sphrase_id=…`) are automatically stripped — no quoting needed when using the `gogol` shell alias.

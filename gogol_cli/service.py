@@ -216,7 +216,13 @@ class GogolCLIService:
             new_event_time_str: The time for the new event in HH-MM format.
             new_price: The ticket price for the new event, or None to keep the original.
         """
-        LOGGER.info("Copying event %s to %s ...", event.id, new_event_date_str)
+        time_display = new_event_time_str.replace("-", ":")
+        LOGGER.info(
+            "Copying event %s to %s at %s ...",
+            event.id,
+            new_event_date_str,
+            time_display,
+        )
 
         new_event_date = datetime.strptime(new_event_date_str, const.DATE_FORMAT)
 
@@ -247,7 +253,13 @@ class GogolCLIService:
             if not self._dry_run:
                 await session.commit()
 
-        LOGGER.info("Finished copying event %s to %s", event.id, new_event_date_str)
+        time_display = new_event_time_str.replace("-", ":")
+        LOGGER.info(
+            "Finished copying event %s to %s at %s",
+            event.id,
+            new_event_date_str,
+            time_display,
+        )
 
     async def export(self, month_number: int, year_suffix: str) -> list[dict[str, int]]:
         """Collect activity statistics for the given month.
