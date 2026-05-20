@@ -3,6 +3,7 @@
 import os
 import re
 from datetime import date, datetime
+from pathlib import Path
 
 import typer
 
@@ -199,6 +200,17 @@ def _pick_image_for_event(
     return _pick_manual_image(image_files)
 
 
+def _load_default_event_image() -> tuple[bytes | None, str | None]:
+    default_image_filename = "рояль.jpg"
+    default_image_path = Path(__file__).resolve().parent / "resources" / default_image_filename
+
+    if not default_image_path.exists():
+        return None, None
+
+    with default_image_path.open("rb") as f:
+        return f.read(), default_image_filename
+
+
 async def _process_single_event(
     cli_service: GogolCLIService,
     docx_path: str,
@@ -220,6 +232,10 @@ async def _process_single_event(
             confirmed_event.date_time,
             image_files,
         )
+        if matched_image_data is None or matched_image_filename is None:
+            matched_image_data, matched_image_filename = _load_default_event_image()
+            if matched_image_data is not None and matched_image_filename is not None:
+                typer.echo(f"Using default image: {matched_image_filename}")
 
     await cli_service.add_event(
         name=confirmed_event.name,
