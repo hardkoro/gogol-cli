@@ -27,17 +27,37 @@ load_dotenv()
 app = typer.Typer()
 
 
+def _extract_urls_from_text(text: str) -> list[str]:
+    """Extract one or more event URLs from arbitrary text."""
+    return [match.group(0) for match in re.finditer(r"https?://\S+", text)]
+
+
 @app.command()
 def pin(
     database_uri: Annotated[str, typer.Option(help="Database URI", envvar="DATABASE_URI")],
-    event_urls: Annotated[list[str], typer.Argument(help="Event URLs")],
     ssh_host: Annotated[str, typer.Option(help="SSH host", envvar="SSH_HOST")],
     ssh_username: Annotated[str, typer.Option(help="SSH username", envvar="SSH_USERNAME")],
     ssh_key_path: Annotated[str, typer.Option(help="SSH key path", envvar="SSH_KEY_PATH")],
     ssh_base_path: Annotated[str, typer.Option(help="SSH base path", envvar="SSH_BASE_PATH")],
+    event_urls: Annotated[list[str] | None, typer.Argument(help="Event URLs")] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
 ) -> None:
     """Pin the event(s)."""
+    resolved_event_urls = event_urls or []
+    if not resolved_event_urls:
+        if sys.stdin.isatty():
+            typer.echo("Paste event URL(s), then press Ctrl-D.")
+
+        stdin_text = sys.stdin.read().strip()
+        if not stdin_text:
+            raise typer.BadParameter(
+                "No event URLs provided. Pass them as arguments or via stdin."
+            )
+
+        resolved_event_urls = _extract_urls_from_text(stdin_text)
+        if not resolved_event_urls:
+            raise typer.BadParameter("No valid event URLs found in stdin input")
+
     uvloop.install()
     ssh_config = SSHConfig(
         host=ssh_host,
@@ -45,7 +65,7 @@ def pin(
         key_path=ssh_key_path,
         base_path=ssh_base_path,
     )
-    asyncio.run(run_pin_event(database_uri, event_urls, dry_run, ssh_config))
+    asyncio.run(run_pin_event(database_uri, resolved_event_urls, dry_run, ssh_config))
 
 
 @app.command()

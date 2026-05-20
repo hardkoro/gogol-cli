@@ -53,6 +53,22 @@ Pin event:
 uv run --env-file .env python -m gogol_cli pin <event-url> [--dry-run]
 ```
 
+Pin multiple events in one command:
+
+```shell
+uv run --env-file .env python -m gogol_cli pin <event-url-1> <event-url-2> <event-url-3> [--dry-run]
+```
+
+Pin multiple events from newline-separated input:
+
+```shell
+uv run --env-file .env python -m gogol_cli pin [--dry-run]
+https://www.domgogolya.ru/recital/21425/
+https://www.domgogolya.ru/recital/21403/
+https://www.domgogolya.ru/recital/21345/
+<Ctrl-D>
+```
+
 Copy event to a new date:
 
 ```shell
