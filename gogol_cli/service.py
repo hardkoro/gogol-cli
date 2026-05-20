@@ -5,6 +5,7 @@ import logging
 import re
 from datetime import date, datetime, timedelta
 
+from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gogol_cli import constants as const
@@ -261,23 +262,226 @@ class GogolCLIService:
             time_display,
         )
 
-    async def export(self, month_number: int, year_suffix: str) -> list[dict[str, int]]:
-        """Collect activity statistics for the given month.
+    async def add_event(
+        self,
+        name: str,
+        event_date_time: datetime,
+        description_html: str,
+        price: str,
+        purchase_link: str,
+        registration_link: str,
+        tags: str,
+        image_data: bytes | None = None,
+        image_filename: str | None = None,
+    ) -> None:
+        """Create a completely new event in the database.
 
         Args:
-            month_number: The calendar month number (1–12).
-            year_suffix: The last two digits of the year (e.g. ``"25"``).
+            name: The event name.
+            event_date_time: The date and time of the event.
+            description_html: The event description in HTML format.
+            price: The ticket price.
+            purchase_link: The link for ticket purchase.
+            registration_link: The link for registration.
+            tags: Optional comma-separated tags.
+            image_data: Optional image binary data.
+            image_filename: Optional image file name.
+        """
+        event_date_str = event_date_time.strftime("%Y-%m-%d")
+        event_time_str = event_date_time.strftime("%H-%M")
+
+        LOGGER.info(
+            "Creating new event '%s' on %s at %s ...",
+            name,
+            event_date_str,
+            event_time_str.replace("-", ":"),
+        )
+
+        async with self._db.session() as session:
+            # Upload image if provided
+            preview_picture_id = None
+            detail_picture_id = None
+            if image_data and image_filename:
+                # Generate subdir
+                new_subdir = self._db.generate_new_subdir()
+
+                # Upload to SSH if not dry run
+                if not self._dry_run:
+                    if self._ssh is None:
+                        raise SSHNotConfiguredError(
+                            "An SSH file manager is required to upload images but was not provided."
+                        )
+                    await self._ssh.upload_file(image_data, new_subdir, image_filename)
+
+                # Insert file record with the subdir we used for SSH
+                preview_picture_id = await self._db.insert_new_file_with_subdir(
+                    session,
+                    new_subdir,
+                    image_filename,
+                    len(image_data),
+                )
+                detail_picture_id = preview_picture_id
+
+            # Create preview text (first paragraph of description)
+            preview_text = description_html
+            if "<p>" in description_html:
+                # Extract first paragraph
+                match = re.search(r"<p>(.*?)</p>", description_html, re.DOTALL)
+                if match:
+                    preview_text = f"<p>{match.group(1)[:200]}...</p>"
+
+            # Insert the event element
+            parsed_tags = [t.strip() for t in tags.split(",") if t.strip()]
+            is_online_title = "онлайн" in name.lower()
+            mode_tag = "Онлайн" if is_online_title else "Офлайн"
+
+            # Remove conflicting/duplicate mode tags from user input, then enforce mode first.
+            parsed_tags = [tag for tag in parsed_tags if tag.lower() not in {"онлайн", "офлайн"}]
+            parsed_tags.insert(0, mode_tag)
+
+            is_free = not price or price.strip() in {"", "0"}
+            if is_free and "Бесплатно" not in parsed_tags:
+                parsed_tags.append("Бесплатно")
+            normalized_tags = ", ".join(parsed_tags) if parsed_tags else None
+
+            new_event_id = await self._db.insert_new_event(
+                session,
+                name=name,
+                event_date_time=event_date_time,
+                preview_picture_id=preview_picture_id,
+                detail_picture_id=detail_picture_id,
+                preview_text=preview_text,
+                detail_text=description_html,
+                tags=normalized_tags,
+            )
+
+            (
+                description_buy_ticket,
+                phone,
+                email,
+                address,
+                location_id,
+                type_of_activity_id,
+                purchase_link_value,
+                registration_link_value,
+            ) = self._infer_new_event_properties(
+                name,
+                description_html,
+                price,
+                purchase_link,
+                registration_link,
+            )
+
+            # Set event properties (date, time, price, link)
+            await self._db.set_new_event_properties(
+                session,
+                new_event_id,
+                event_date_time,
+                event_time_str,
+                price,
+                {
+                    "purchase_link": purchase_link_value,
+                    "registration_link": registration_link_value,
+                    "description_buy_ticket": description_buy_ticket,
+                    "phone": phone,
+                    "email": email,
+                    "address": address,
+                    "location_id": location_id,
+                    "type_of_activity_id": type_of_activity_id,
+                },
+            )
+
+            # Add to event section
+            await self._db.add_element_to_section(
+                session, new_event_id, const.EVENT_IBLOCK_SECTION_ID
+            )
+
+            if not self._dry_run:
+                await session.commit()
+
+        LOGGER.info(
+            "Finished creating new event '%s' (id=%d) on %s at %s",
+            name,
+            new_event_id,
+            event_date_str,
+            event_time_str.replace("-", ":"),
+        )
+
+    @staticmethod
+    def _infer_new_event_properties(
+        name: str,
+        description_html: str,
+        price: str,
+        purchase_link: str,
+        registration_link: str,
+    ) -> tuple[str, str, str, str, int, int, str | None, str | None]:
+        """Infer property values for newly added events.
 
         Returns:
-            A list of dicts with ``what`` and ``cnt`` keys.
+            description_buy_ticket, phone, email, address, location_id,
+            type_of_activity_id, purchase_link, registration_link.
         """
+        combined = f"{name} {description_html}".lower()
+        is_registration = bool(registration_link.strip())
+        is_free = not price or price.strip() in {"", "0"} or "бесплат" in combined
+
+        if is_registration and is_free:
+            description_buy_ticket = "Мероприятие бесплатное. Вход по регистрации"
+        elif is_free:
+            description_buy_ticket = "Мероприятие бесплатное. Вход свободный"
+        else:
+            description_buy_ticket = "Мероприятие платное"
+
+        # Keep current known location id default until dedicated IDs are provided.
+        location_id = const.DEFAULT_LOCATION_ID
+        if "лекторий" in combined or "новое крыло" in combined:
+            address = const.LECTURE_HALL_ADDRESS
+        else:
+            address = const.DEFAULT_ADDRESS
+
+        type_map: list[tuple[int, tuple[str, ...]]] = [
+            (70, ("онлайн-лекц", "online lecture")),
+            (69, ("онлайн мастер", "онлайн-мастер")),
+            (68, ("кинолектор",)),
+            (71, ("мастер-класс", "мастер класс")),
+            (72, ("интеллектуаль", "квиз", "викторин")),
+            (40, ("лекц",)),
+            (41, ("экскурс",)),
+            (10, ("спектакл",)),
+            (9, ("концерт",)),
+            (8, ("творческий вечер",)),
+            (121, ("литературный клуб",)),
+            (63, ("детск", "студи")),
+            (62, ("онлайн", "zoom", "трансляц")),
+        ]
+        type_of_activity_id = 40
+        for type_id, keywords in type_map:
+            if any(keyword in combined for keyword in keywords):
+                type_of_activity_id = type_id
+                break
+
+        purchase_link_value = purchase_link.strip() or None
+        registration_link_value = registration_link.strip() or None
+
+        return (
+            description_buy_ticket,
+            const.DEFAULT_PHONE,
+            const.DEFAULT_EMAIL,
+            address,
+            location_id,
+            type_of_activity_id,
+            purchase_link_value,
+            registration_link_value,
+        )
+
+    async def export(self, month_number: int, year_suffix: str) -> list[dict[str, int]]:
+        """Collect activity statistics for the given month."""
         LOGGER.info("Exporting monthly statistics for %s/%s ...", month_number, year_suffix)
 
         start_date, end_date = self._get_start_and_end_dates(month_number, year_suffix)
         statistics = await self._db.export_statistics(start_date, end_date)
 
         LOGGER.info("Finished exporting monthly statistics for %s/%s", month_number, year_suffix)
-
         return statistics
 
     @staticmethod
@@ -299,12 +503,7 @@ class GogolCLIService:
         return start_date, next_month_start_date
 
     async def copy_chronograph(self, month_number: int, year_suffix: str) -> None:
-        """Create a new chronograph section for the given month and copy entries from 5 years ago.
-
-        Args:
-            month_number: The calendar month number (1–12).
-            year_suffix: The last two digits of the target year (e.g. ``"25"``).
-        """
+        """Create a new chronograph section and copy entries from 5 years ago."""
         LOGGER.info("Copying chronograph for %s/%s ...", month_number, year_suffix)
 
         old_full_year = f"20{int(year_suffix) - const.CHRONOGRAPH_YEAR_OFFSET}"
@@ -332,29 +531,17 @@ class GogolCLIService:
         parsed: ParsedExhibition,
         active_from: datetime,
     ) -> None:
-        """Create an exhibition and its books from parsed docx data.
-
-        Uploads cover images via SSH, inserts file records, creates a section
-        for books, inserts the exhibition element and one book element per book,
-        and sets the bibliographic properties on each book.
-
-        Args:
-            parsed: The exhibition data produced by ``parse_exhibition_folder``.
-            active_from: The ``active_from`` datetime to set on all created elements.
-        """
-        from PIL import Image
-
+        """Create an exhibition and its books from parsed docx data."""
         LOGGER.info("Creating exhibition '%s' ...", parsed.title)
 
         async with self._db.session() as session:
             if not self._dry_run and self._ssh is None:
                 raise SSHNotConfiguredError(
-                    "An SSH file manager is required to upload images " "but was not provided."
+                    "An SSH file manager is required to upload images but was not provided."
                 )
 
             ssh = self._ssh
 
-            # --- Illustration ---
             illus_subdir = self._db.generate_new_subdir()
             if not self._dry_run:
                 assert ssh is not None
@@ -374,10 +561,8 @@ class GogolCLIService:
                 len(parsed.illustration_data),
             )
 
-            # --- Book section (created first so we have section_id for properties) ---
             section_id = await self._db.insert_book_section(session, parsed.title)
 
-            # --- Exhibition element ---
             exhibition_id = await self._db.insert_exhibition_element(
                 session,
                 title=parsed.title,
@@ -391,7 +576,6 @@ class GogolCLIService:
                 session, exhibition_id, section_id, active_from
             )
 
-            # --- Books ---
             for book in parsed.books:
                 cover_subdir = self._db.generate_new_subdir()
                 if not self._dry_run:
@@ -444,18 +628,8 @@ class GogolCLIService:
         self,
         parsed: ParsedVirtualExhibition,
     ) -> None:
-        """Create a virtual exhibition and upload its images via SSH.
-
-        Resizes images whose largest dimension exceeds the configured maximum,
-        uploads each image to the remote server, inserts file records in the
-        database, and stores the exhibition element together with all item
-        properties.
-
-        Args:
-            parsed: The virtual exhibition data produced by
-                ``parse_virtual_exhibition_folder``.
-        """
-        LOGGER.info("Creating virtual exhibition '%s' …", parsed.title)
+        """Create a virtual exhibition and upload its images via SSH."""
+        LOGGER.info("Creating virtual exhibition '%s' ...", parsed.title)
 
         async with self._db.session() as session:
             if not self._dry_run and self._ssh is None:
@@ -465,7 +639,6 @@ class GogolCLIService:
 
             ssh = self._ssh
 
-            # ── Preview / detail image ───────────────────────────────────────
             preview_data, preview_w, preview_h = _resize_image(
                 parsed.preview_image_data, const.VIRTUAL_EXHIBITION_MAX_IMAGE_DIM
             )
@@ -484,8 +657,6 @@ class GogolCLIService:
                 len(preview_data),
             )
 
-            # ── Exhibition element ───────────────────────────────────────────
-            # The element is active from today until one day after the display end date.
             element_active_from = datetime.today()
             element_active_to = parsed.active_to + timedelta(days=1)
             exhibition_id = await self._db.insert_virtual_exhibition_element(
@@ -506,7 +677,6 @@ class GogolCLIService:
                 active_to=parsed.active_to,
             )
 
-            # ── Items ────────────────────────────────────────────────────────
             for item in parsed.items:
                 image_file_ids: list[int] = []
                 for img_data, img_filename in item.images:
@@ -578,8 +748,6 @@ def _resize_image(data: bytes, max_dim: int) -> tuple[bytes, int, int]:
     Returns:
         (resized_bytes, width, height)  – original bytes if no resize needed.
     """
-    from PIL import Image
-
     with Image.open(io.BytesIO(data)) as img:
         orig_format = img.format or "JPEG"
         w, h = img.width, img.height

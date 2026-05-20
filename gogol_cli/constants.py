@@ -34,6 +34,22 @@ EVENT_DEFAULT_SORT = 500
 EVENT_TIME_PROPERTY_ID = 14
 EVENT_DATE_PROPERTY_ID = 15
 EVENT_PRICE_PROPERTY_ID = 129
+EVENT_LINK_PROPERTY_ID = 103  # Property ID for ticket purchase link
+EVENT_PURCHASE_LINK_PROPERTY_ID = 103  # Property ID for ticket purchase link
+EVENT_REGISTRATION_LINK_PROPERTY_ID = 108  # Property ID for registration link
+EVENT_DESCRIPTION_BUY_TICKET_PROPERTY_ID = 173  # Description for ticket purchase/registration
+EVENT_PHONE_PROPERTY_ID = 134  # Phone number property
+EVENT_EMAIL_PROPERTY_ID = 133  # Email property
+EVENT_ADDRESS_PROPERTY_ID = 132  # Address property
+EVENT_LOCATION_PROPERTY_ID = 131  # Location property
+EVENT_TYPE_OF_ACTIVITY_PROPERTY_ID = 19  # Type of activity property
+
+# Default values for new properties
+DEFAULT_PHONE = "+7 495 695-75-47"
+DEFAULT_EMAIL = "gogolinfo@yandex.ru"
+DEFAULT_ADDRESS = "Никитский бульвар, д.\xa07А, м.\xa0Арбатская"
+LECTURE_HALL_ADDRESS = "Никитский бульвар, д.\xa07, м.\xa0Арбатская"
+DEFAULT_LOCATION_ID = 83  # Театральная гостиная
 
 # --- Chronograph iblock ----------------------------------------------------------
 

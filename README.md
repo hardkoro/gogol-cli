@@ -141,6 +141,29 @@ uv run --env-file .env python -m gogol_cli virtual <folder> [--dry-run]
 
 The folder must contain a single `.doc` or `.docx` file (exhibition description) and any number of image files. КП-numbered images (e.g. `КП-123.jpg`) are matched to exhibition items; the first unnumbered image is used as the exhibition preview.
 
+Add new events from a folder of `.docx` files:
+
+```shell
+uv run --env-file .env python -m gogol_cli add <folder> [--dry-run]
+```
+
+The command processes multiple event files in one run, one by one.
+
+Expected per-event source structure in `.docx`:
+
+- name
+- date and time
+- multi-paragraph description
+- price
+- purchase or registration link
+
+The command runs interactively:
+
+- parses values and proposes them for confirmation/editing
+- preserves text formatting from `.docx` (e.g. bold/italic) in HTML
+- excludes price and links from the description field
+- tries to auto-match images by date patterns in filenames and asks for confirmation
+
 ## Shell alias
 
 Add the following to `~/.zshrc` to use `gogol` as a short alias from anywhere:
@@ -166,6 +189,7 @@ gogol export <month-number> <year-suffix>
 gogol chrono <month-number> <year-suffix>
 gogol exhibit <folder>
 gogol virtual <folder>
+gogol add <folder>
 ```
 
 ## Development

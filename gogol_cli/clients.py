@@ -4,6 +4,7 @@ import logging
 import re
 from datetime import datetime, timedelta
 from itertools import count
+from typing import TypedDict
 from uuid import uuid4
 
 from sqlalchemy import text
@@ -14,6 +15,19 @@ from gogol_cli.exceptions import DBEventNotFoundError
 from gogol_cli.schemas import Event, File
 
 LOGGER = logging.getLogger(__name__)
+
+
+class NewEventProperties(TypedDict):
+    """Property payload for creating a new event."""
+
+    purchase_link: str | None
+    registration_link: str | None
+    description_buy_ticket: str
+    phone: str
+    email: str
+    address: str
+    location_id: int
+    type_of_activity_id: int
 
 
 class DatabaseClient:
@@ -70,8 +84,7 @@ class DatabaseClient:
 
         async with self._session_maker() as session:
             result = await session.execute(
-                text(
-                    """
+                text("""
                     SELECT
                         b_iblock_element.id,
                         b_iblock_element.name,
@@ -86,8 +99,7 @@ class DatabaseClient:
                         b_iblock_element.tags
                     FROM b_iblock_element
                     WHERE b_iblock_element.id = :event_id
-                """
-                ),
+                """),
                 {"event_id": event_id},
             )
             row = result.mappings().fetchone()
@@ -134,8 +146,7 @@ class DatabaseClient:
             The ID of the newly inserted file record.
         """
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_file (
                     timestamp_x, module_id, height, width, file_size, content_type,
                     subdir, file_name, original_name, description, handler_id, external_id
@@ -145,8 +156,7 @@ class DatabaseClient:
                     :subdir, file_name, original_name, description, handler_id, external_id
                 FROM b_file
                 WHERE id = :original_id
-            """
-            ),
+            """),
             {"subdir": new_subdir, "original_id": original_id},
         )
         return await DatabaseClient._get_last_insert_id(session)
@@ -167,8 +177,7 @@ class DatabaseClient:
         active_to = (event.active_to - timedelta(hours=1)).strftime(const.DATETIME_FORMAT)
 
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_iblock_element (
                     timestamp_x, modified_by, date_create, created_by,
                     iblock_id, active, active_from, active_to,
@@ -179,8 +188,7 @@ class DatabaseClient:
                     :iblock_id, 'Y', :active_from, :active_to,
                     :sort, :name, :preview_picture, :searchable_content, 0
                 )
-            """
-            ),
+            """),
             {
                 "now": now,
                 "user": const.DEFAULT_USER_ID,
@@ -209,16 +217,14 @@ class DatabaseClient:
             {"pin_id": pin_id},
         )
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_iblock_element_property
                     (iblock_property_id, iblock_element_id, value, value_type, value_num)
                 VALUES
                     (:link_prop_id,  :pin_id, :url,        'text', 0.0000),
                     (:btn_prop_id,   :pin_id, 'Подробнее', 'text', 0.0000),
                     (:name_prop_id,  :pin_id, :name,       'text', 0.0000)
-            """
-            ),
+            """),
             {
                 "link_prop_id": const.PIN_LINK_PROPERTY_ID,
                 "btn_prop_id": const.PIN_BUTTON_TEXT_PROPERTY_ID,
@@ -273,8 +279,7 @@ class DatabaseClient:
         ).upper()
 
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_iblock_element (
                     timestamp_x, modified_by, date_create, created_by,
                     iblock_id, iblock_section_id, active, active_from, active_to,
@@ -289,8 +294,7 @@ class DatabaseClient:
                     :detail_picture, :detail_text, :detail_text_type,
                     :searchable_content, :tags, 0, ''
                 )
-            """
-            ),
+            """),
             {
                 "now": now,
                 "user": const.DEFAULT_USER_ID,
@@ -331,8 +335,7 @@ class DatabaseClient:
             )
         )
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_search_content (
                     date_change, module_id, item_id, custom_rank,
                     url, title, body, tags, param1, param2,
@@ -343,8 +346,7 @@ class DatabaseClient:
                     :url, :title, :body, :tags, :param1, :param2,
                     :date_from, :date_to
                 )
-            """
-            ),
+            """),
             {
                 "now": now,
                 "item_id": str(new_event_id),
@@ -385,26 +387,22 @@ class DatabaseClient:
             {"new_id": new_event_id},
         )
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_iblock_element_property
                     (iblock_property_id, iblock_element_id, value, value_type, value_enum, value_num, description)
                 SELECT iblock_property_id, :new_id, value, value_type, value_enum, value_num, description
                 FROM b_iblock_element_property
                 WHERE iblock_element_id = :old_id
-            """
-            ),
+            """),
             {"new_id": new_event_id, "old_id": old_event.id},
         )
         await session.execute(
-            text(
-                """
+            text("""
                 UPDATE b_iblock_element_property
                 SET value = :time_value
                 WHERE iblock_element_id = :event_id
                   AND iblock_property_id = :prop_id
-            """
-            ),
+            """),
             {
                 "time_value": new_event_time.replace("-", ":"),
                 "event_id": new_event_id,
@@ -412,14 +410,12 @@ class DatabaseClient:
             },
         )
         await session.execute(
-            text(
-                """
+            text("""
                 UPDATE b_iblock_element_property
                 SET value = :date_value
                 WHERE iblock_element_id = :event_id
                   AND iblock_property_id = :prop_id
-            """
-            ),
+            """),
             {
                 "date_value": new_event_date.strftime(const.DATETIME_FORMAT),
                 "event_id": new_event_id,
@@ -428,14 +424,12 @@ class DatabaseClient:
         )
         if new_event_price is not None:
             await session.execute(
-                text(
-                    """
+                text("""
                     UPDATE b_iblock_element_property
                     SET value = :price
                     WHERE iblock_element_id = :event_id
                       AND iblock_property_id = :prop_id
-                """
-                ),
+                """),
                 {
                     "price": new_event_price,
                     "event_id": new_event_id,
@@ -455,28 +449,324 @@ class DatabaseClient:
             section_id: The ID of the section to add the element to.
         """
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_iblock_section_element
                     (iblock_section_id, iblock_element_id, additional_property_id)
                 VALUES (:section_id, :element_id, NULL)
-            """
-            ),
+            """),
             {"section_id": section_id, "element_id": element_id},
+        )
+
+    @staticmethod
+    async def insert_new_file(
+        session: AsyncSession,
+        subdir: str,
+        filename: str,
+        content_type: str,
+        width: int,
+        height: int,
+        file_size: int,
+    ) -> int:
+        """Insert a new file record into b_file for an uploaded image.
+
+        Args:
+            session: The active database session.
+            subdir: The subdirectory path where the file was uploaded.
+            filename: The file name on disk.
+            content_type: The MIME type (e.g. ``"image/jpeg"``).
+            width: Image width in pixels.
+            height: Image height in pixels.
+            file_size: File size in bytes.
+
+        Returns:
+            The ID of the newly inserted file record.
+        """
+        await session.execute(
+            text("""
+                INSERT INTO b_file (
+                    timestamp_x, module_id, height, width, file_size, content_type,
+                    subdir, file_name, original_name, description, handler_id, external_id
+                )
+                VALUES (
+                    NOW(), 'iblock', :height, :width, :file_size, :content_type,
+                    :subdir, :file_name, :file_name, NULL, NULL, NULL
+                )
+            """),
+            {
+                "height": height,
+                "width": width,
+                "file_size": file_size,
+                "content_type": content_type,
+                "subdir": subdir,
+                "file_name": filename,
+            },
+        )
+        return await DatabaseClient._get_last_insert_id(session)
+
+    @staticmethod
+    async def insert_new_file_with_subdir(
+        session: AsyncSession,
+        subdir: str,
+        file_name: str,
+        file_size: int,
+        height: int = 0,
+        width: int = 0,
+    ) -> int:
+        """Insert a new b_file record with a pre-generated subdir (for SSH uploads).
+
+        Args:
+            session: The active database session.
+            subdir: The subdirectory path where the file was uploaded via SSH.
+            file_name: The original file name.
+            file_size: The size of the file in bytes.
+            height: Image height (0 if unknown).
+            width: Image width (0 if unknown).
+
+        Returns:
+            The ID of the newly inserted file record.
+        """
+        content_type = "image/png" if file_name.endswith(".png") else "image/jpeg"
+
+        await session.execute(
+            text("""
+                INSERT INTO b_file (
+                    timestamp_x, module_id, height, width, file_size, content_type,
+                    subdir, file_name, original_name, description, handler_id, external_id
+                )
+                VALUES (
+                    :now, 'iblock', :height, :width, :file_size, :content_type,
+                    :subdir, :file_name, :original_name, '', 'default', ''
+                )
+            """),
+            {
+                "now": datetime.now(tz=None).strftime(const.DATETIME_FORMAT),
+                "height": height,
+                "width": width,
+                "file_size": file_size,
+                "content_type": content_type,
+                "subdir": subdir,
+                "file_name": file_name,
+                "original_name": file_name,
+            },
+        )
+        return await DatabaseClient._get_last_insert_id(session)
+
+    @staticmethod
+    async def insert_new_event(
+        session: AsyncSession,
+        name: str,
+        event_date_time: datetime,
+        preview_picture_id: int | None,
+        detail_picture_id: int | None,
+        preview_text: str,
+        detail_text: str,
+        tags: str | None = None,
+    ) -> int:
+        """Insert a completely new event element.
+
+        Args:
+            session: The active database session.
+            name: The event name.
+            event_date_time: The date and time of the event.
+            preview_picture_id: The file ID for the preview picture, or None.
+            detail_picture_id: The file ID for the detail picture, or None.
+            preview_text: The preview text (typically HTML).
+            detail_text: The detail text (typically HTML).
+            tags: Optional tags for the event.
+
+        Returns:
+            The ID of the newly inserted event element.
+        """
+        now = datetime.now(tz=None).strftime(const.DATETIME_FORMAT)
+
+        # Calculate active_to: 1 hour after the event time
+        active_to = (event_date_time + timedelta(hours=1)).strftime(const.DATETIME_FORMAT)
+
+        def _strip_html(s: str | None) -> str:
+            return re.sub(r"<[^>]+>", " ", s or "")
+
+        searchable_content = " ".join(
+            filter(
+                None,
+                [
+                    name,
+                    _strip_html(preview_text),
+                    _strip_html(detail_text),
+                ],
+            )
+        ).upper()
+
+        await session.execute(
+            text("""
+                INSERT INTO b_iblock_element (
+                    timestamp_x, modified_by, date_create, created_by,
+                    iblock_id, iblock_section_id, active, active_from, active_to,
+                    sort, name, preview_picture, preview_text, preview_text_type,
+                    detail_picture, detail_text, detail_text_type,
+                    searchable_content, tags, tmp_id, code
+                )
+                VALUES (
+                    :now, :user, :now, :user,
+                    :iblock_id, NULL, 'Y', :active_from, :active_to,
+                    :sort, :name, :preview_picture, :preview_text, :preview_text_type,
+                    :detail_picture, :detail_text, :detail_text_type,
+                    :searchable_content, :tags, 0, ''
+                )
+            """),
+            {
+                "now": now,
+                "user": const.DEFAULT_USER_ID,
+                "iblock_id": const.EVENT_IBLOCK_ID,
+                "active_from": now,
+                "active_to": active_to,
+                "sort": const.EVENT_DEFAULT_SORT,
+                "name": name,
+                "preview_picture": preview_picture_id,
+                "preview_text": preview_text,
+                "preview_text_type": "html",
+                "detail_picture": detail_picture_id,
+                "detail_text": detail_text,
+                "detail_text_type": "html",
+                "searchable_content": searchable_content,
+                "tags": tags,
+            },
+        )
+        new_event_id = await DatabaseClient._get_last_insert_id(session)
+
+        # Insert b_search_content so the calendar filter picks up the new event
+        url = (
+            f"=ID={new_event_id}&EXTERNAL_ID={new_event_id}"
+            f"&IBLOCK_SECTION_ID={const.EVENT_IBLOCK_SECTION_ID}"
+            f"&IBLOCK_TYPE_ID={const.EVENT_IBLOCK_TYPE_ID}"
+            f"&IBLOCK_ID={const.EVENT_IBLOCK_ID}"
+            f"&IBLOCK_CODE={const.EVENT_IBLOCK_CODE}"
+            f"&IBLOCK_EXTERNAL_ID={const.EVENT_IBLOCK_EXTERNAL_ID}"
+            f"&CODE="
+        )
+        body = " ".join(
+            filter(
+                None,
+                [
+                    _strip_html(preview_text),
+                    _strip_html(detail_text),
+                ],
+            )
+        )
+        await session.execute(
+            text("""
+                INSERT INTO b_search_content (
+                    date_change, module_id, item_id, custom_rank,
+                    url, title, body, tags, param1, param2,
+                    date_from, date_to
+                )
+                VALUES (
+                    :now, 'iblock', :item_id, 0,
+                    :url, :title, :body, :tags, :param1, :param2,
+                    :date_from, :date_to
+                )
+            """),
+            {
+                "now": now,
+                "item_id": str(new_event_id),
+                "url": url,
+                "title": name,
+                "body": body,
+                "tags": tags,
+                "param1": const.EVENT_IBLOCK_TYPE_ID,
+                "param2": str(const.EVENT_IBLOCK_ID),
+                "date_from": now,
+                "date_to": active_to,
+            },
+        )
+
+        return new_event_id
+
+    @staticmethod
+    async def set_new_event_properties(
+        session: AsyncSession,
+        event_id: int,
+        event_date: datetime,
+        event_time_str: str,
+        price: str,
+        properties: NewEventProperties,
+    ) -> None:
+        """Set properties on a newly created event.
+
+        Args:
+            session: The active database session.
+            event_id: The ID of the event element.
+            event_date: The event date.
+            event_time_str: The event time in HH-MM format.
+            price: The ticket price.
+            properties: Derived property values:
+                purchase_link, registration_link, description_buy_ticket,
+                phone, email, address, location_id, type_of_activity_id.
+        """
+        purchase_link = properties["purchase_link"]
+        registration_link = properties["registration_link"]
+        description_buy_ticket = properties["description_buy_ticket"]
+        phone = properties["phone"]
+        email = properties["email"]
+        address = properties["address"]
+        location_id = properties["location_id"]
+        type_of_activity_id = properties["type_of_activity_id"]
+
+        await session.execute(
+            text("UPDATE b_iblock_element SET xml_id = :event_id WHERE id = :event_id"),
+            {"event_id": event_id},
+        )
+
+        # Insert event properties
+        await session.execute(
+            text("""
+                INSERT INTO b_iblock_element_property
+                    (iblock_property_id, iblock_element_id, value, value_type, value_enum, value_num, description)
+                VALUES
+                    (:date_prop_id, :event_id, :date_value, 'text', NULL, 0.0000, ''),
+                    (:time_prop_id, :event_id, :time_value, 'text', NULL, 0.0000, ''),
+                    (:price_prop_id, :event_id, :price_value, 'text', NULL, 0.0000, ''),
+                    (:purchase_link_prop_id, :event_id, :purchase_link_value, 'text', NULL, 0.0000, ''),
+                    (:registration_link_prop_id, :event_id, :registration_link_value, 'text', NULL, 0.0000, ''),
+                    (:desc_buy_ticket_prop_id, :event_id, :desc_buy_ticket_value, 'text', NULL, 0.0000, ''),
+                    (:phone_prop_id, :event_id, :phone_value, 'text', NULL, 0.0000, ''),
+                    (:email_prop_id, :event_id, :email_value, 'text', NULL, 0.0000, ''),
+                    (:address_prop_id, :event_id, :address_value, 'text', NULL, 0.0000, ''),
+                    (:location_prop_id, :event_id, :location_value, 'text', :location_enum, 0.0000, ''),
+                    (:type_of_activity_prop_id, :event_id, :type_of_activity_value, 'text', :type_of_activity_enum, 0.0000, '')
+            """),
+            {
+                "date_prop_id": const.EVENT_DATE_PROPERTY_ID,
+                "time_prop_id": const.EVENT_TIME_PROPERTY_ID,
+                "price_prop_id": const.EVENT_PRICE_PROPERTY_ID,
+                "purchase_link_prop_id": const.EVENT_PURCHASE_LINK_PROPERTY_ID,
+                "registration_link_prop_id": const.EVENT_REGISTRATION_LINK_PROPERTY_ID,
+                "desc_buy_ticket_prop_id": const.EVENT_DESCRIPTION_BUY_TICKET_PROPERTY_ID,
+                "phone_prop_id": const.EVENT_PHONE_PROPERTY_ID,
+                "email_prop_id": const.EVENT_EMAIL_PROPERTY_ID,
+                "address_prop_id": const.EVENT_ADDRESS_PROPERTY_ID,
+                "location_prop_id": const.EVENT_LOCATION_PROPERTY_ID,
+                "type_of_activity_prop_id": const.EVENT_TYPE_OF_ACTIVITY_PROPERTY_ID,
+                "event_id": event_id,
+                "date_value": event_date.strftime(const.DATE_FORMAT),
+                "time_value": event_time_str.replace("-", ":"),
+                "price_value": price,
+                "purchase_link_value": purchase_link,
+                "registration_link_value": registration_link,
+                "desc_buy_ticket_value": description_buy_ticket,
+                "phone_value": phone,
+                "email_value": email,
+                "address_value": address,
+                "location_value": str(location_id),
+                "location_enum": location_id,
+                "type_of_activity_value": str(type_of_activity_id),
+                "type_of_activity_enum": type_of_activity_id,
+            },
         )
 
     async def export_statistics(
         self, start_date: datetime, end_date: datetime
     ) -> list[dict[str, int]]:
-        """Query activity statistics for a given date range.
-
-        Args:
-            start_date: The start of the reporting period (inclusive).
-            end_date: The end of the reporting period (exclusive).
-
-        Returns:
-            A list of dicts, each with a ``what`` label and a ``cnt`` count.
-        """
+        """Query activity statistics for a given date range."""
         LOGGER.info("Exporting monthly statistics from %s to %s ...", start_date, end_date)
 
         query = """
@@ -510,17 +800,11 @@ class DatabaseClient:
 
     @staticmethod
     async def insert_chronograph_section(session: AsyncSession, section_name: str) -> None:
-        """Insert a new chronograph section with the given name.
-
-        Args:
-            session: The active database session.
-            section_name: The human-readable name for the new section.
-        """
+        """Insert a new chronograph section with the given name."""
         LOGGER.info("Adding chronograph section %s ...", section_name)
 
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_iblock_section (
                     timestamp_x, modified_by, date_create, created_by,
                     iblock_id, iblock_section_id, active, global_active,
@@ -533,8 +817,7 @@ class DatabaseClient:
                     :sort, :name, NULL, 1, :searchable_content,
                     0, NULL, NULL
                 )
-            """
-            ),
+            """),
             {
                 "user": const.DEFAULT_USER_ID,
                 "iblock_id": const.CHRONOGRAPH_IBLOCK_ID,
@@ -548,23 +831,21 @@ class DatabaseClient:
 
     @staticmethod
     async def get_chronograph_section_by_name(session: AsyncSession, section_name: str) -> int:
-        """Look up the ID of a chronograph section by its name.
-
-        Args:
-            session: The active database session.
-            section_name: The exact name of the section to look up.
-
-        Returns:
-            The ID of the matching chronograph section.
-        """
+        """Get chronograph section ID by name."""
         result = await session.execute(
-            text("SELECT id FROM b_iblock_section WHERE name = :name"),
-            {"name": section_name},
+            text("""
+                SELECT id
+                FROM b_iblock_section
+                WHERE iblock_id = :iblock_id
+                  AND name = :name
+                LIMIT 1
+            """),
+            {"iblock_id": const.CHRONOGRAPH_IBLOCK_ID, "name": section_name},
         )
         row = result.fetchone()
         if row is None:
-            raise ValueError(f"Chronograph section '{section_name}' not found")
-        return row[0]
+            raise ValueError(f"Chronograph section not found: {section_name}")
+        return int(row[0])
 
     @staticmethod
     async def copy_chronograph_section(
@@ -572,13 +853,7 @@ class DatabaseClient:
         source_section_id: int,
         destination_section_id: int,
     ) -> None:
-        """Copy all elements from a source chronograph section into a destination section.
-
-        Args:
-            session: The active database session.
-            source_section_id: The ID of the section to copy elements from.
-            destination_section_id: The ID of the section to copy elements into.
-        """
+        """Copy chronograph section elements and shift year property."""
         LOGGER.info(
             "Copying chronograph section %s into %s ...",
             source_section_id,
@@ -586,50 +861,39 @@ class DatabaseClient:
         )
 
         await session.execute(
-            text(
-                """
-                UPDATE b_iblock_element
-                SET iblock_section_id = :dest_id,
-                    modified_by       = :user,
-                    date_create       = NOW(),
-                    created_by        = :user,
-                    active            = 'Y',
-                    active_from       = active_from + INTERVAL 5 YEAR,
-                    active_to         = active_to   + INTERVAL 5 YEAR
-                WHERE iblock_section_id = :src_id
-            """
-            ),
-            {
-                "dest_id": destination_section_id,
-                "src_id": source_section_id,
-                "user": const.DEFAULT_USER_ID,
-            },
-        )
-        await session.execute(
-            text(
-                """
-                INSERT INTO b_iblock_section_element
-                    (iblock_section_id, iblock_element_id, additional_property_id)
-                SELECT :dest_id, id, NULL
+            text("""
+                INSERT INTO b_iblock_element (
+                    timestamp_x, modified_by, date_create, created_by,
+                    iblock_id, iblock_section_id, active, active_from, active_to,
+                    sort, name, preview_picture, preview_text, preview_text_type,
+                    detail_picture, detail_text, detail_text_type,
+                    searchable_content, tmp_id, code
+                )
+                SELECT
+                    NOW(), modified_by, NOW(), created_by,
+                    iblock_id, :dst_section_id, active, active_from, active_to,
+                    sort, name, preview_picture, preview_text, preview_text_type,
+                    detail_picture, detail_text, detail_text_type,
+                    searchable_content, 0, code
                 FROM b_iblock_element
-                WHERE iblock_section_id = :dest_id
-            """
-            ),
-            {"dest_id": destination_section_id},
+                WHERE iblock_section_id = :src_section_id
+            """),
+            {
+                "src_section_id": source_section_id,
+                "dst_section_id": destination_section_id,
+            },
         )
 
         for element_id in await DatabaseClient._get_affected_elements(
             session, destination_section_id
         ):
             await session.execute(
-                text(
-                    """
+                text("""
                     UPDATE b_iblock_element_property
                     SET value = value + :year_offset
                     WHERE iblock_element_id = :element_id
                       AND iblock_property_id = :prop_id
-                """
-                ),
+                """),
                 {
                     "year_offset": const.CHRONOGRAPH_YEAR_OFFSET,
                     "element_id": element_id,
@@ -650,76 +914,18 @@ class DatabaseClient:
 
     @staticmethod
     async def _get_affected_elements(session: AsyncSession, section_id: int) -> list[int]:
-        """Get element IDs within a section (uses the provided session to see uncommitted rows)."""
+        """Get element IDs within a section (including uncommitted rows)."""
         result = await session.execute(
             text("SELECT id FROM b_iblock_element WHERE iblock_section_id = :section_id"),
             {"section_id": section_id},
         )
-        return [row[0] for row in result.all()]
-
-    @staticmethod
-    async def insert_new_file(
-        session: AsyncSession,
-        subdir: str,
-        filename: str,
-        content_type: str,
-        width: int,
-        height: int,
-        file_size: int,
-    ) -> int:
-        """Insert a new file record into b_file for an uploaded image.
-
-        Args:
-            session: The active database session.
-            subdir: The subdirectory path where the file was uploaded.
-            filename: The file name on disk.
-            content_type: The MIME type (e.g. ``"image/jpeg"``).
-            width: Image width in pixels.
-            height: Image height in pixels.
-            file_size: File size in bytes.
-
-        Returns:
-            The ID of the newly inserted file record.
-        """
-        await session.execute(
-            text(
-                """
-                INSERT INTO b_file (
-                    timestamp_x, module_id, height, width, file_size,
-                    content_type, subdir, file_name, original_name,
-                    description, handler_id, external_id
-                ) VALUES (
-                    NOW(), 'iblock', :height, :width, :file_size,
-                    :content_type, :subdir, :file_name, :file_name,
-                    NULL, NULL, NULL
-                )
-            """
-            ),
-            {
-                "height": height,
-                "width": width,
-                "file_size": file_size,
-                "content_type": content_type,
-                "subdir": subdir,
-                "file_name": filename,
-            },
-        )
-        return await DatabaseClient._get_last_insert_id(session)
+        return [int(row[0]) for row in result.all()]
 
     @staticmethod
     async def insert_book_section(session: AsyncSession, section_name: str) -> int:
-        """Insert a new top-level section in the book iblock (iblock 9).
-
-        Args:
-            session: The active database session.
-            section_name: The name for the new section (typically the exhibition title).
-
-        Returns:
-            The ID of the newly inserted section.
-        """
+        """Insert a new top-level section in the book iblock (iblock 9)."""
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_iblock_section (
                     timestamp_x, modified_by, date_create, created_by,
                     iblock_id, iblock_section_id, active, global_active,
@@ -731,8 +937,7 @@ class DatabaseClient:
                     :sort, :name, NULL, 1, :searchable_content,
                     'text', 0, NULL, NULL
                 )
-            """
-            ),
+            """),
             {
                 "user": const.DEFAULT_USER_ID,
                 "iblock_id": const.BOOK_IBLOCK_ID,
@@ -753,24 +958,10 @@ class DatabaseClient:
         detail_picture_id: int,
         active_from: datetime,
     ) -> int:
-        """Insert a new exhibition element in iblock 14.
-
-        Args:
-            session: The active database session.
-            title: The exhibition title (used as the element name).
-            preview_text: HTML preview text.
-            detail_text: HTML detail text.
-            preview_picture_id: File ID of the preview picture.
-            detail_picture_id: File ID of the detail picture.
-            active_from: The activation date/time for the element.
-
-        Returns:
-            The ID of the newly inserted element.
-        """
+        """Insert a new exhibition element in iblock 14."""
         active_from_str = active_from.strftime(const.DATETIME_FORMAT)
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_iblock_element (
                     timestamp_x, modified_by, date_create, created_by,
                     iblock_id, iblock_section_id, active, active_from, active_to,
@@ -784,8 +975,7 @@ class DatabaseClient:
                     :detail_picture, :detail_text, 'html',
                     :searchable_content, 0
                 )
-            """
-            ),
+            """),
             {
                 "user": const.DEFAULT_USER_ID,
                 "iblock_id": const.EXHIBITION_IBLOCK_ID,
@@ -818,26 +1008,10 @@ class DatabaseClient:
         active_from: datetime,
         sort: int,
     ) -> int:
-        """Insert a new book element in iblock 9 and link it to its section.
-
-        Args:
-            session: The active database session.
-            title: The book title (used as the element name).
-            section_id: The ID of the parent section.
-            preview_text: HTML preview text (first sentence of description).
-            detail_text: HTML full description.
-            preview_picture_id: File ID of the cover used as preview picture.
-            detail_picture_id: File ID of the cover used as detail picture.
-            active_from: The activation date/time for the element.
-            sort: Sort order.
-
-        Returns:
-            The ID of the newly inserted element.
-        """
+        """Insert a new book element in iblock 9 and link it to its section."""
         active_from_str = active_from.strftime(const.DATETIME_FORMAT)
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_iblock_element (
                     timestamp_x, modified_by, date_create, created_by,
                     iblock_id, iblock_section_id, active, active_from, active_to,
@@ -851,8 +1025,7 @@ class DatabaseClient:
                     :detail_picture, :detail_text, 'html',
                     :searchable_content, 0
                 )
-            """
-            ),
+            """),
             {
                 "user": const.DEFAULT_USER_ID,
                 "iblock_id": const.BOOK_IBLOCK_ID,
@@ -873,13 +1046,11 @@ class DatabaseClient:
             {"id": element_id},
         )
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_iblock_section_element
                     (iblock_section_id, iblock_element_id, additional_property_id)
                 VALUES (:section_id, :element_id, NULL)
-            """
-            ),
+            """),
             {"section_id": section_id, "element_id": element_id},
         )
         return element_id
@@ -891,19 +1062,11 @@ class DatabaseClient:
         section_id: int,
         active_from: datetime,
     ) -> None:
-        """Set the section-link and date properties on an exhibition element.
-
-        Args:
-            session: The active database session.
-            element_id: The ID of the exhibition element.
-            section_id: The ID of the linked book section.
-            active_from: The activation datetime for the exhibition.
-        """
+        """Set the section-link and date properties on an exhibition element."""
         date_value = active_from.strftime("%Y-%m-%d 00:00:00")
         year_num = float(active_from.year)
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_iblock_element_property
                     (iblock_property_id, iblock_element_id, value,
                      value_type, value_enum, value_num, description)
@@ -912,8 +1075,7 @@ class DatabaseClient:
                      'text', NULL, :section_num, NULL),
                     (:prop_date,    :id, :date_value,
                      'text', NULL, :year_num,    NULL)
-            """
-            ),
+            """),
             {
                 "prop_section": const.EXHIBITION_SECTION_PROPERTY_ID,
                 "prop_date": const.EXHIBITION_DATE_PROPERTY_ID,
@@ -935,21 +1097,10 @@ class DatabaseClient:
         publisher: str,
         year: str,
     ) -> None:
-        """Set bibliographic iblock properties on a book element.
-
-        Args:
-            session: The active database session.
-            book_id: The ID of the book element.
-            full_bib_text: PHP-serialized full bib string (property 30).
-            author: Author string (property 31).
-            city: City abbreviation (property 57).
-            publisher: Publisher name (property 58).
-            year: Publication year string (property 59).
-        """
+        """Set bibliographic iblock properties on a book element."""
         year_num = float(year) if year.isdigit() else 0.0
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_iblock_element_property
                     (iblock_property_id, iblock_element_id, value, value_type,
                      value_enum, value_num, description)
@@ -959,8 +1110,7 @@ class DatabaseClient:
                     (:prop57, :id, :city,      'text', NULL, 0.0,       NULL),
                     (:prop58, :id, :publisher, 'text', NULL, 0.0,       NULL),
                     (:prop59, :id, :year,      'text', NULL, :year_num, NULL)
-            """
-            ),
+            """),
             {
                 "prop30": const.BOOK_FULL_BIB_PROPERTY_ID,
                 "prop31": const.BOOK_AUTHOR_PROPERTY_ID,
@@ -984,11 +1134,7 @@ class DatabaseClient:
 
     @staticmethod
     def generate_new_subdir() -> str:
-        """Generate a unique subdirectory path for a new file upload.
-
-        Returns:
-            A path string in the form ``iblock/xxx/xxx/<uuid>``.
-        """
+        """Generate a unique subdirectory path for a new file upload."""
         file_hash = uuid4().hex
         return f"iblock/{file_hash[:3]}/{file_hash[3:6]}/{file_hash}"
 
@@ -1003,26 +1149,11 @@ class DatabaseClient:
         active_from: datetime,
         active_to: datetime,
     ) -> int:
-        """Insert a new virtual exhibition element in iblock 5.
-
-        Args:
-            session: The active database session.
-            title: The exhibition title (element name).
-            preview_text: HTML preview text.
-            detail_text: HTML detail text.
-            preview_picture_id: File ID for the preview picture.
-            detail_picture_id: File ID for the detail picture.
-            active_from: The start date of the exhibition.
-            active_to: The end date of the exhibition (exclusive, element active_to).
-
-        Returns:
-            The ID of the newly inserted element.
-        """
+        """Insert a new virtual exhibition element in iblock 5."""
         active_from_str = active_from.strftime(const.DATETIME_FORMAT)
         active_to_str = active_to.strftime(const.DATETIME_FORMAT)
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_iblock_element (
                     timestamp_x, modified_by, date_create, created_by,
                     iblock_id, iblock_section_id, active, active_from, active_to,
@@ -1036,8 +1167,7 @@ class DatabaseClient:
                     :detail_picture, :detail_text, 'html',
                     :searchable_content, 0
                 )
-            """
-            ),
+            """),
             {
                 "user": const.DEFAULT_USER_ID,
                 "iblock_id": const.VIRTUAL_EXHIBITION_IBLOCK_ID,
@@ -1068,26 +1198,14 @@ class DatabaseClient:
         active_from: datetime,
         active_to: datetime,
     ) -> None:
-        """Set fixed and date properties on a virtual exhibition element.
-
-        Inserts props 9 (type), 54 (active_from), 55 (active_to), 66 (sort=0),
-        196 (subtitle), and 213 (category link).
-
-        Args:
-            session: The active database session.
-            element_id: The ID of the virtual exhibition element.
-            subtitle: The subtitle text (prop 196).
-            active_from: The start date for props 54.
-            active_to: The display end date for prop 55 (one day before element active_to).
-        """
+        """Set fixed and date properties on a virtual exhibition element."""
         from_str = active_from.strftime("%Y-%m-%d 00:00:00")
         to_str = active_to.strftime("%Y-%m-%d 00:00:00")
         from_year = float(active_from.year)
         to_year = float(active_to.year)
 
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_iblock_element_property
                     (iblock_property_id, iblock_element_id, value,
                      value_type, value_enum, value_num, description)
@@ -1098,8 +1216,7 @@ class DatabaseClient:
                     (:prop66,  :id, '0',       'text', NULL,     0.0,        NULL),
                     (:prop196, :id, :subtitle, 'text', NULL,     0.0,        NULL),
                     (:prop213, :id, :val213,   'text', :enum213, NULL,       NULL)
-            """
-            ),
+            """),
             {
                 "prop9": const.VIRTUAL_EXHIBITION_PROP_TYPE_ID,
                 "val9": str(const.VIRTUAL_EXHIBITION_PROP_TYPE_VALUE),
@@ -1129,171 +1246,72 @@ class DatabaseClient:
         description_html: str,
         image_file_ids: list[int],
     ) -> None:
-        """Insert all properties for one virtual exhibition item.
-
-        Inserts props 197 (name), 198 (bib), 199 (description), 200 (image file IDs),
-        and 205 (linking array), all sharing the same ``scp_<id>`` description key.
-
-        The scp key is derived from the LAST_INSERT_ID after inserting prop 197.
-
-        Args:
-            session: The active database session.
-            exhibition_id: The ID of the parent virtual exhibition element.
-            name: The item title (prop 197).
-            bib_html: PHP-serialised bib HTML (prop 198).
-            description_html: PHP-serialised description HTML (prop 199).
-            image_file_ids: File IDs for the item images (prop 200, one row per image).
-        """
-        # Insert prop 197 (name) and derive the scp key from its ID
+        """Insert all properties for one virtual exhibition item."""
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_iblock_element_property
-                    (iblock_property_id, iblock_element_id, value,
-                     value_type, value_enum, value_num, description)
-                VALUES (:prop197, :eid, :name, 'text', NULL, 0.0, NULL)
-            """
-            ),
+                    (iblock_property_id, iblock_element_id, value, value_type, value_num)
+                VALUES
+                    (:prop_name, :exh_id, :name, 'text', 0.0)
+            """),
             {
-                "prop197": const.VIRTUAL_EXHIBITION_PROP_ITEM_NAME_ID,
-                "eid": exhibition_id,
+                "prop_name": const.VIRTUAL_EXHIBITION_PROP_ITEM_NAME_ID,
+                "exh_id": exhibition_id,
                 "name": name,
             },
         )
-        prop197_id = await DatabaseClient._get_last_insert_id(session)
-        scp_key = f"scp_{prop197_id}"
 
-        # Update the scp key on prop 197
-        await session.execute(
-            text("UPDATE b_iblock_element_property SET description = :scp WHERE id = :pid"),
-            {"scp": scp_key, "pid": prop197_id},
-        )
+        result = await session.execute(text("SELECT LAST_INSERT_ID()"))
+        scp_id = result.scalar_one()
+        scp_description = f"scp_{scp_id}"
 
-        # Insert prop 198 (bib info)
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_iblock_element_property
-                    (iblock_property_id, iblock_element_id, value,
-                     value_type, value_enum, value_num, description)
-                VALUES (:prop198, :eid, :bib, 'text', NULL, 0.0, :scp)
-            """
-            ),
+                    (iblock_property_id, iblock_element_id, value, value_type, value_num, description)
+                VALUES
+                    (:prop_bib, :exh_id, :bib_html, 'text', 0.0, :descr),
+                    (:prop_desc, :exh_id, :description_html, 'text', 0.0, :descr)
+            """),
             {
-                "prop198": const.VIRTUAL_EXHIBITION_PROP_ITEM_BIB_ID,
-                "eid": exhibition_id,
-                "bib": bib_html,
-                "scp": scp_key,
+                "prop_bib": const.VIRTUAL_EXHIBITION_PROP_ITEM_BIB_ID,
+                "prop_desc": const.VIRTUAL_EXHIBITION_PROP_ITEM_DESC_ID,
+                "exh_id": exhibition_id,
+                "bib_html": bib_html,
+                "description_html": description_html,
+                "descr": scp_description,
             },
         )
-        prop198_id = await DatabaseClient._get_last_insert_id(session)
 
-        # Insert prop 199 (description)
-        await session.execute(
-            text(
-                """
-                INSERT INTO b_iblock_element_property
-                    (iblock_property_id, iblock_element_id, value,
-                     value_type, value_enum, value_num, description)
-                VALUES (:prop199, :eid, :desc, 'text', NULL, 0.0, :scp)
-            """
-            ),
-            {
-                "prop199": const.VIRTUAL_EXHIBITION_PROP_ITEM_DESC_ID,
-                "eid": exhibition_id,
-                "desc": description_html,
-                "scp": scp_key,
-            },
-        )
-        prop199_id = await DatabaseClient._get_last_insert_id(session)
-
-        # Insert prop 200 (image file IDs — one row per image)
-        prop200_ids: list[int] = []
         for file_id in image_file_ids:
             await session.execute(
-                text(
-                    """
+                text("""
                     INSERT INTO b_iblock_element_property
-                        (iblock_property_id, iblock_element_id, value,
-                         value_type, value_enum, value_num, description)
-                    VALUES (:prop200, :eid, :fid, 'text', NULL, :fnum, :scp)
-                """
-                ),
+                        (iblock_property_id, iblock_element_id, value, value_type, value_num, description)
+                    VALUES
+                        (:prop_img, :exh_id, :file_id, 'text', :file_num, :descr)
+                """),
                 {
-                    "prop200": const.VIRTUAL_EXHIBITION_PROP_ITEM_IMAGE_ID,
-                    "eid": exhibition_id,
-                    "fid": str(file_id),
-                    "fnum": float(file_id),
-                    "scp": scp_key,
+                    "prop_img": const.VIRTUAL_EXHIBITION_PROP_ITEM_IMAGE_ID,
+                    "exh_id": exhibition_id,
+                    "file_id": str(file_id),
+                    "file_num": float(file_id),
+                    "descr": scp_description,
                 },
             )
-            prop200_ids.append(await DatabaseClient._get_last_insert_id(session))
 
-        # Build and insert prop 205 (linking array)
-        link_value = _php_serialize_item_link(
-            exhibition_id=exhibition_id,
-            scp_key=scp_key,
-            prop197_id=prop197_id,
-            prop198_id=prop198_id,
-            prop199_id=prop199_id,
-            prop200_ids=prop200_ids,
-            image_file_ids=image_file_ids,
-        )
+        link_value = f'a:1:{{s:2:"id";s:{len(str(scp_id))}:"{scp_id}";}}'
         await session.execute(
-            text(
-                """
+            text("""
                 INSERT INTO b_iblock_element_property
-                    (iblock_property_id, iblock_element_id, value,
-                     value_type, value_enum, value_num, description)
-                VALUES (:prop205, :eid, :val, 'text', 0, 0.0, :scp)
-            """
-            ),
+                    (iblock_property_id, iblock_element_id, value, value_type, value_num, description)
+                VALUES
+                    (:prop_link, :exh_id, :value, 'text', 0.0, :descr)
+            """),
             {
-                "prop205": const.VIRTUAL_EXHIBITION_PROP_ITEM_LINK_ID,
-                "eid": exhibition_id,
-                "val": link_value,
-                "scp": scp_key,
+                "prop_link": const.VIRTUAL_EXHIBITION_PROP_ITEM_LINK_ID,
+                "exh_id": exhibition_id,
+                "value": link_value,
+                "descr": scp_description,
             },
         )
-
-
-def _php_serialize_item_link(
-    exhibition_id: int,
-    scp_key: str,
-    prop197_id: int,
-    prop198_id: int,
-    prop199_id: int,
-    prop200_ids: list[int],
-    image_file_ids: list[int],
-) -> str:
-    """Build the PHP-serialised prop 205 linking array for one virtual exhibition item.
-
-    The format mirrors what Bitrix CMS stores for composite property groups::
-
-        a:1:{i:<elem_id>;a:4:{i:197;a:1:{i:<id>;s:<len>:"scp_X";}...}}
-
-    For prop 200 the inner value is the file ID string, not the scp key.
-    """
-    scp_bytes = scp_key.encode("utf-8")
-    scp_len = len(scp_bytes)
-    scp_s = f's:{scp_len}:"{scp_key}"'
-
-    def _prop_entry_scp(prop_id: int, record_ids: list[int]) -> str:
-        inner = "".join(f"i:{rid};{scp_s};" for rid in record_ids)
-        return f"i:{prop_id};a:{len(record_ids)}:{{{inner}}}"
-
-    def _prop_entry_file(prop_id: int, row_ids: list[int], file_ids: list[int]) -> str:
-        parts = []
-        for row_id, file_id in zip(row_ids, file_ids):
-            fid_str = str(file_id)
-            parts.append(f'i:{row_id};s:{len(fid_str)}:"{fid_str}";')
-        return f"i:{prop_id};a:{len(row_ids)}:{{{''.join(parts)}}}"
-
-    entries = [
-        _prop_entry_scp(197, [prop197_id]),
-        _prop_entry_scp(198, [prop198_id]),
-        _prop_entry_scp(199, [prop199_id]),
-        _prop_entry_file(200, prop200_ids, image_file_ids),
-    ]
-    inner = "".join(entries)
-    return f"a:1:{{i:{exhibition_id};a:{len(entries)}:{{{inner}}}}}"

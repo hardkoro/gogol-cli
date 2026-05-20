@@ -16,6 +16,7 @@ from gogol_cli.runner import copy_chronograph as run_chronograph
 from gogol_cli.runner import copy_event as run_copy_event
 from gogol_cli.runner import create_exhibition as run_create_exhibition
 from gogol_cli.runner import create_virtual_exhibition as run_create_virtual_exhibition
+from gogol_cli.runner import add_events as run_add_events
 from gogol_cli.runner import export_statistics as run_export
 from gogol_cli.runner import pin_event as run_pin_event
 from gogol_cli.runner import xcopy_events as run_xcopy_events
@@ -234,6 +235,30 @@ def virtual(
         base_path=ssh_base_path,
     )
     asyncio.run(run_create_virtual_exhibition(database_uri, folder, dry_run, ssh_config))
+
+
+@app.command()
+def add(
+    database_uri: Annotated[str, typer.Option(help="Database URI", envvar="DATABASE_URI")],
+    ssh_host: Annotated[str, typer.Option(help="SSH host", envvar="SSH_HOST")],
+    ssh_username: Annotated[str, typer.Option(help="SSH username", envvar="SSH_USERNAME")],
+    ssh_key_path: Annotated[str, typer.Option(help="SSH key path", envvar="SSH_KEY_PATH")],
+    ssh_base_path: Annotated[str, typer.Option(help="SSH base path", envvar="SSH_BASE_PATH")],
+    folder: Annotated[
+        str,
+        typer.Argument(help="Path to the folder with event .docx files and images"),
+    ] = ".events",
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
+) -> None:
+    """Add new events from a folder of .docx files."""
+    uvloop.install()
+    ssh_config = SSHConfig(
+        host=ssh_host,
+        username=ssh_username,
+        key_path=ssh_key_path,
+        base_path=ssh_base_path,
+    )
+    asyncio.run(run_add_events(database_uri, folder, dry_run, ssh_config))
 
 
 @app.command()
