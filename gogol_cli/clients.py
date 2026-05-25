@@ -561,6 +561,7 @@ class DatabaseClient:
         preview_text: str,
         detail_text: str,
         tags: str | None = None,
+        is_active: bool = True,
     ) -> int:
         """Insert a completely new event element.
 
@@ -573,6 +574,7 @@ class DatabaseClient:
             preview_text: The preview text (typically HTML).
             detail_text: The detail text (typically HTML).
             tags: Optional tags for the event.
+            is_active: Whether the event should be active (default: True).
 
         Returns:
             The ID of the newly inserted event element.
@@ -596,6 +598,8 @@ class DatabaseClient:
             )
         ).upper()
 
+        active_status = "Y" if is_active else "N"
+
         await session.execute(
             text("""
                 INSERT INTO b_iblock_element (
@@ -607,7 +611,7 @@ class DatabaseClient:
                 )
                 VALUES (
                     :now, :user, :now, :user,
-                    :iblock_id, NULL, 'Y', :active_from, :active_to,
+                    :iblock_id, NULL, :active, :active_from, :active_to,
                     :sort, :name, :preview_picture, :preview_text, :preview_text_type,
                     :detail_picture, :detail_text, :detail_text_type,
                     :searchable_content, :tags, 0, ''
@@ -617,6 +621,7 @@ class DatabaseClient:
                 "now": now,
                 "user": const.DEFAULT_USER_ID,
                 "iblock_id": const.EVENT_IBLOCK_ID,
+                "active": active_status,
                 "active_from": now,
                 "active_to": active_to,
                 "sort": const.EVENT_DEFAULT_SORT,

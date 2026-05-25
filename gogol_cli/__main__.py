@@ -249,6 +249,7 @@ def add(
         typer.Argument(help="Path to the folder with event .docx files and images"),
     ] = ".events",
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
+    inactive: Annotated[bool, typer.Option("--inactive", help="Add events as inactive")] = False,
 ) -> None:
     """Add new events from a folder of .docx files."""
     uvloop.install()
@@ -258,7 +259,7 @@ def add(
         key_path=ssh_key_path,
         base_path=ssh_base_path,
     )
-    asyncio.run(run_add_events(database_uri, folder, dry_run, ssh_config))
+    asyncio.run(run_add_events(database_uri, folder, dry_run, ssh_config, inactive))
 
 
 @app.command()

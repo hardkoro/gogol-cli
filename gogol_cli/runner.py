@@ -13,7 +13,7 @@ from gogol_cli.exhibition.docx_parser import parse_exhibition_folder
 from gogol_cli.exceptions import EmailConfigError, SMTPConfigError
 from gogol_cli.exporters import AbstractExporter, PlainExporter, SMTPExporter
 from gogol_cli.exporters.smtp import EmailConfig, SMTPConfig
-from gogol_cli.service import GogolCLIService
+from gogol_cli.service import GogolCLIService, EventData
 from gogol_cli.ssh_file_manager import SSHConfig, SSHFileManager
 from gogol_cli.virtual_exhibition.parser import parse_virtual_exhibition_folder
 
@@ -180,16 +180,26 @@ def _pick_manual_image(image_files: dict[str, str]) -> tuple[bytes | None, str |
 def _pick_image_for_event(
     event_date: datetime,
     image_files: dict[str, str],
+    docx_stem: str = "",
 ) -> tuple[bytes | None, str | None]:
-    event_date_str = event_date.strftime("%d.%m")
     matched_image: str | None = None
 
-    for img_file in image_files:
-        if re.search(r"\d{2}\.\d{2}", img_file) and event_date_str.replace(
-            ".", ""
-        ) in img_file.replace(".", ""):
-            matched_image = img_file
-            break
+    # Prefer an image whose stem matches the docx filename exactly
+    if docx_stem:
+        for img_file in image_files:
+            if os.path.splitext(img_file)[0] == docx_stem:
+                matched_image = img_file
+                break
+
+    # Fall back to date-based matching
+    if matched_image is None:
+        event_date_str = event_date.strftime("%d.%m")
+        for img_file in image_files:
+            if re.search(r"\d{2}\.\d{2}", img_file) and event_date_str.replace(
+                ".", ""
+            ) in img_file.replace(".", ""):
+                matched_image = img_file
+                break
 
     if matched_image is not None:
         typer.echo(f"Auto-matched image: {matched_image}")
@@ -216,6 +226,7 @@ async def _process_single_event(
     docx_path: str,
     docx_file: str,
     image_files: dict[str, str],
+    force_inactive: bool = False,
 ) -> None:
     typer.echo(f"\n{'=' * 60}")
     typer.echo(f"Processing: {docx_file}")
@@ -229,25 +240,34 @@ async def _process_single_event(
         matched_image_filename = confirmed_event.image_filename
     else:
         matched_image_data, matched_image_filename = _pick_image_for_event(
-            confirmed_event.date_time,
+            confirmed_event.date_times[0],
             image_files,
+            docx_stem=os.path.splitext(docx_file)[0],
         )
         if matched_image_data is None or matched_image_filename is None:
             matched_image_data, matched_image_filename = _load_default_event_image()
             if matched_image_data is not None and matched_image_filename is not None:
                 typer.echo(f"Using default image: {matched_image_filename}")
 
-    await cli_service.add_event(
-        name=confirmed_event.name,
-        event_date_time=confirmed_event.date_time,
-        description_html=confirmed_event.description,
-        price=confirmed_event.price,
-        purchase_link=confirmed_event.purchase_link,
-        registration_link=confirmed_event.registration_link,
-        tags=confirmed_event.tags,
-        image_data=matched_image_data,
-        image_filename=matched_image_filename,
-    )
+    # Process each date/time occurrence
+    for event_date_time in confirmed_event.date_times:
+        is_active = False if force_inactive else confirmed_event.is_active
+        event_data: EventData = {
+            "name": confirmed_event.name,
+            "event_date_time": event_date_time,
+            "description_html": confirmed_event.description,
+            "price": confirmed_event.price,
+            "purchase_link": confirmed_event.purchase_link,
+            "registration_link": confirmed_event.registration_link,
+            "tags": confirmed_event.tags,
+            "address": confirmed_event.address,
+            "is_active": is_active,
+        }
+        await cli_service.add_event(
+            event_data=event_data,
+            image_data=matched_image_data,
+            image_filename=matched_image_filename,
+        )
 
     typer.echo("✓ Event created successfully")
 
@@ -257,9 +277,9 @@ async def add_events(
     folder_path: str,
     dry_run: bool,
     ssh_config: SSHConfig,
+    inactive: bool = False,
 ) -> None:
     """Run the event creation script with improved structure."""
-
     database_client = DatabaseClient(database_uri)
     ssh_file_manager = SSHFileManager(ssh_config)
     cli_service = GogolCLIService(database_client, ssh_file_manager, dry_run)
@@ -279,4 +299,5 @@ async def add_events(
             docx_path=docx_path,
             docx_file=docx_file,
             image_files=image_files,
+            force_inactive=inactive,
         )

@@ -4,6 +4,7 @@ import io
 import logging
 import re
 from datetime import date, datetime, timedelta
+from typing import TypedDict
 
 from PIL import Image
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +18,21 @@ from gogol_cli.ssh_file_manager import SSHFileManager
 from gogol_cli.virtual_exhibition.schemas import ParsedVirtualExhibition
 
 LOGGER = logging.getLogger(__name__)
+
+
+class EventData(TypedDict):
+    """Data for creating a new event."""
+
+    name: str
+    event_date_time: datetime
+    description_html: str
+    price: str
+    purchase_link: str
+    registration_link: str
+    tags: str
+    address: str
+    is_active: bool
+
 
 _RUSSIAN_MONTHS: dict[str, int] = {
     "января": 1,
@@ -264,29 +280,27 @@ class GogolCLIService:
 
     async def add_event(
         self,
-        name: str,
-        event_date_time: datetime,
-        description_html: str,
-        price: str,
-        purchase_link: str,
-        registration_link: str,
-        tags: str,
+        event_data: EventData,
         image_data: bytes | None = None,
         image_filename: str | None = None,
     ) -> None:
         """Create a completely new event in the database.
 
         Args:
-            name: The event name.
-            event_date_time: The date and time of the event.
-            description_html: The event description in HTML format.
-            price: The ticket price.
-            purchase_link: The link for ticket purchase.
-            registration_link: The link for registration.
-            tags: Optional comma-separated tags.
+            event_data: Event metadata (name, date, description, etc).
             image_data: Optional image binary data.
             image_filename: Optional image file name.
         """
+        name = event_data["name"]
+        event_date_time = event_data["event_date_time"]
+        description_html = event_data["description_html"]
+        price = event_data["price"]
+        purchase_link = event_data["purchase_link"]
+        registration_link = event_data["registration_link"]
+        tags = event_data["tags"]
+        address = event_data["address"]
+        is_active = event_data["is_active"]
+
         event_date_str = event_date_time.strftime("%Y-%m-%d")
         event_time_str = event_date_time.strftime("%H-%M")
 
@@ -353,13 +367,14 @@ class GogolCLIService:
                 preview_text=preview_text,
                 detail_text=description_html,
                 tags=normalized_tags,
+                is_active=is_active,
             )
 
             (
                 description_buy_ticket,
                 phone,
                 email,
-                address,
+                inferred_address,
                 location_id,
                 type_of_activity_id,
                 purchase_link_value,
@@ -370,6 +385,7 @@ class GogolCLIService:
                 price,
                 purchase_link,
                 registration_link,
+                address_override=address,
             )
 
             # Set event properties (date, time, price, link)
@@ -385,7 +401,7 @@ class GogolCLIService:
                     "description_buy_ticket": description_buy_ticket,
                     "phone": phone,
                     "email": email,
-                    "address": address,
+                    "address": inferred_address,
                     "location_id": location_id,
                     "type_of_activity_id": type_of_activity_id,
                 },
@@ -400,11 +416,12 @@ class GogolCLIService:
                 await session.commit()
 
         LOGGER.info(
-            "Finished creating new event '%s' (id=%d) on %s at %s",
+            "Finished creating new event '%s' (id=%d) on %s at %s — https://www.domgogolya.ru/recital/%d/",
             name,
             new_event_id,
             event_date_str,
             event_time_str.replace("-", ":"),
+            new_event_id,
         )
 
     @staticmethod
@@ -414,8 +431,12 @@ class GogolCLIService:
         price: str,
         purchase_link: str,
         registration_link: str,
+        address_override: str | None = None,
     ) -> tuple[str, str, str, str, int, int, str | None, str | None]:
         """Infer property values for newly added events.
+
+        Args:
+            address_override: Optional address to use instead of inferring.
 
         Returns:
             description_buy_ticket, phone, email, address, location_id,
@@ -434,7 +455,9 @@ class GogolCLIService:
 
         # Keep current known location id default until dedicated IDs are provided.
         location_id = const.DEFAULT_LOCATION_ID
-        if "лекторий" in combined or "новое крыло" in combined:
+        if address_override:
+            address = address_override
+        elif "лекторий" in combined or "новое крыло" in combined:
             address = const.LECTURE_HALL_ADDRESS
         else:
             address = const.DEFAULT_ADDRESS
