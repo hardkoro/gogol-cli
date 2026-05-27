@@ -36,7 +36,8 @@ _MAX_MINUTE = 59
 
 # Venue-specific address mapping
 _VENUE_ADDRESSES: dict[str, str] = {
-    "Новое крыло": "Никитский бульвар, д.\xa07, м.\xa0Арбатская",
+    "Новое крыло": const.LECTURE_HALL_ADDRESS,
+    "Лекторий": const.LECTURE_HALL_ADDRESS,
 }
 
 
@@ -279,10 +280,9 @@ def _extract_link(line: str) -> str | None:
     return match.group(0) if match else None
 
 
-def _is_registration_line(line: str) -> bool:
-    """Return True when line indicates registration rather than ticket purchase."""
-    lower = line.lower()
-    return "регистрац" in lower
+def _is_registration_line(line: str, context: str = "") -> bool:
+    """Return True when line or surrounding context indicates registration rather than ticket purchase."""
+    return "регистрац" in (line + " " + context).lower()
 
 
 def _default_mode_tag(name: str) -> str:
@@ -377,7 +377,8 @@ def _scan_trailing_fields(paragraphs: list[str], start_idx: int) -> tuple[str, s
         if "https://" in para or "http://" in para:
             extracted_link = _extract_link(para)
             if extracted_link:
-                if _is_registration_line(para):
+                prev_para = paragraphs[i - 1] if i > start_idx + 1 else ""
+                if _is_registration_line(para, prev_para):
                     registration_link = extracted_link
                 else:
                     purchase_link = extracted_link
@@ -392,12 +393,13 @@ def _scan_trailing_fields(paragraphs: list[str], start_idx: int) -> tuple[str, s
     return price, purchase_link, registration_link, description_end_idx
 
 
-def _resolve_final_address(address: str | None, description_html: str) -> str:
+def _resolve_final_address(address: str | None, description_html: str, tail_text: str = "") -> str:
     """Return address: explicit > venue lookup > default."""
     if address:
         return address
+    searchable = description_html + " " + tail_text
     for venue_name, venue_address in _VENUE_ADDRESSES.items():
-        if venue_name in description_html:
+        if venue_name in searchable:
             return venue_address
     return const.DEFAULT_ADDRESS
 
@@ -434,7 +436,8 @@ def parse_event_file(file_path: str) -> ParsedEvent:
     description_paras = paragraphs[date_time_idx + 1 : description_end_idx]
     address, filtered_description_paras = _extract_address(description_paras)
     description_html = _paragraphs_to_html(filtered_description_paras)
-    final_address = _resolve_final_address(address, description_html)
+    tail_text = " ".join(p for p in paragraphs[description_end_idx:] if p)
+    final_address = _resolve_final_address(address, description_html, tail_text)
 
     image_data, image_filename = img_result if img_result else (None, None)
 
