@@ -166,9 +166,9 @@ def _parse_date_time(line: str) -> datetime | None:
 
 
 def _parse_multiple_date_times(line: str) -> list[datetime]:
-    """Parse multiple times from a line like '30 мая в 14:00 и 16:00'.
+    """Parse multiple dates/times from a line like '16, 17, 18 июня в 12:00' or '30 мая в 14:00 и 16:00'.
 
-    Returns list of datetime objects for all times found.
+    Returns list of datetime objects for all day × time combinations found.
     """
     date_times: list[datetime] = []
 
@@ -184,37 +184,41 @@ def _parse_multiple_date_times(line: str) -> list[datetime]:
     if month_match is None or month_num is None:
         return date_times
 
-    # Extract day
-    day_match = re.search(r"(\d{1,2})\s+" + re.escape(month_match), line)
-    if day_match is None:
+    # Extract all day numbers before the month name (handles "16, 17, 18 июня" and "18 июня")
+    month_pos = line.index(month_match)
+    before_month = line[:month_pos]
+    days = [
+        int(m) for m in re.findall(r"\d{1,2}", before_month) if 1 <= int(m) <= _MAX_DAY_IN_MONTH
+    ]
+
+    if not days:
         return date_times
-    day = int(day_match.group(1))
 
     # Extract the time section after the month name; "в" is optional
-    after_month = line[day_match.end() :]
+    after_month = line[month_pos + len(month_match) :]
     time_section_match = re.search(r"(?:в\s+)?(\d.+)$", after_month)
     if time_section_match is None:
         return date_times
     time_section = time_section_match.group(1)
 
-    # Extract all times (HH:MM or HH), handling "и" as separator
-    time_pattern = r"(\d{1,2}):?(\d{2})?"
-    time_matches = re.finditer(time_pattern, time_section)
+    # Extract all times as HH:MM pairs (require colon to avoid spurious matches)
+    times: list[tuple[int, int]] = []
+    for time_match in re.finditer(r"(\d{1,2}):(\d{2})", time_section):
+        hour = int(time_match.group(1))
+        minute = int(time_match.group(2))
+        if 0 <= hour <= _MAX_HOUR and 0 <= minute <= _MAX_MINUTE:
+            times.append((hour, minute))
+
+    if not times:
+        return date_times
 
     today = datetime.now().date()
-    for time_match in time_matches:
-        hour = int(time_match.group(1))
-        minute = int(time_match.group(2)) if time_match.group(2) else 0
-
-        # Validate hour and minute are in valid ranges
-        if hour < 0 or hour > _MAX_HOUR or minute < 0 or minute > _MAX_MINUTE:
-            continue
-
-        candidate = datetime(today.year, month_num, day, hour, minute)
-        if candidate.date() < today:
-            candidate = datetime(today.year + 1, month_num, day, hour, minute)
-
-        date_times.append(candidate)
+    for day in days:
+        for hour, minute in times:
+            candidate = datetime(today.year, month_num, day, hour, minute)
+            if candidate.date() < today:
+                candidate = datetime(today.year + 1, month_num, day, hour, minute)
+            date_times.append(candidate)
 
     return date_times
 
@@ -244,13 +248,17 @@ def _extract_address(paragraphs: list[str]) -> tuple[str | None, list[str]]:
     return address, filtered
 
 
+def _strip_trailing_colon(text: str) -> str:
+    """Strip a trailing colon (with optional whitespace) left by a removed link paragraph."""
+    return re.sub(r":\s*$", "", text)
+
+
 def _paragraphs_to_html(paragraphs: list[str]) -> str:
     """Convert a list of paragraphs to HTML."""
     result = []
     for paragraph in paragraphs:
         if paragraph:  # Skip empty paragraphs
-            # Always wrap normal paragraph content into <p>; preserve already-wrapped blocks.
-            wrapped = paragraph.strip()
+            wrapped = _strip_trailing_colon(paragraph.strip())
             if not (wrapped.startswith("<p") and wrapped.endswith("</p>")):
                 wrapped = f"<p>{wrapped}</p>"
             result.append(wrapped)
@@ -288,6 +296,14 @@ def _is_registration_line(line: str, context: str = "") -> bool:
 def _default_mode_tag(name: str) -> str:
     """Return default mode tag based on event title."""
     return "Онлайн" if "онлайн" in name.lower() else "Офлайн"
+
+
+def _build_default_tags(name: str, price: str) -> str:
+    """Return default comma-separated tags, appending 'Бесплатно' when price is empty."""
+    tags = _default_mode_tag(name)
+    if not price:
+        tags += ",Бесплатно"
+    return tags
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +464,7 @@ def parse_event_file(file_path: str) -> ParsedEvent:
         price=price,
         purchase_link=purchase_link,
         registration_link=registration_link,
-        tags=_default_mode_tag(name),
+        tags=_build_default_tags(name, price),
         address=final_address,
         is_active=True,
         image_data=image_data,

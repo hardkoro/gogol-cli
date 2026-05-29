@@ -51,6 +51,16 @@ DEFAULT_ADDRESS = "Никитский бульвар, д.\xa07А, м.\xa0Арб�
 LECTURE_HALL_ADDRESS = "Никитский бульвар, д.\xa07, м.\xa0Арбатская"
 DEFAULT_LOCATION_ID = 83  # Театральная гостиная
 
+# Location enum IDs (b_iblock_property_enum, property_id = EVENT_LOCATION_PROPERTY_ID)
+LOCATION_READING_ROOM_ID = 81  # Читальный зал
+LOCATION_NEW_WING_ID = 82  # Новое крыло
+LOCATION_THEATRE_LOUNGE_ID = 83  # Театральная гостиная
+LOCATION_EXHIBITION_HALL_ID = 84  # Выставочный зал
+LOCATION_MOSCOW_ID = 85  # Москва (outdoor/offsite)
+LOCATION_MUSEUM_ID = 86  # Музей
+
+MOSCOW_LOCATION_ID = LOCATION_MOSCOW_ID
+
 # --- Chronograph iblock ----------------------------------------------------------
 
 CHRONOGRAPH_IBLOCK_ID = 8

@@ -453,14 +453,15 @@ class GogolCLIService:
         else:
             description_buy_ticket = "Мероприятие платное"
 
-        # Keep current known location id default until dedicated IDs are provided.
-        location_id = const.DEFAULT_LOCATION_ID
         if address_override:
             address = address_override
+            location_id = const.MOSCOW_LOCATION_ID
         elif "лекторий" in combined or "новое крыло" in combined:
             address = const.LECTURE_HALL_ADDRESS
+            location_id = const.DEFAULT_LOCATION_ID
         else:
             address = const.DEFAULT_ADDRESS
+            location_id = const.DEFAULT_LOCATION_ID
 
         type_map: list[tuple[int, tuple[str, ...]]] = [
             (70, ("онлайн-лекц", "online lecture")),
