@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from gogol_cli.exporters.smtp import EmailConfig, SMTPConfig
 from gogol_cli.runner import copy_chronograph as run_chronograph
 from gogol_cli.runner import copy_event as run_copy_event
+from gogol_cli.runner import add_books as run_add_books
 from gogol_cli.runner import create_exhibition as run_create_exhibition
 from gogol_cli.runner import create_virtual_exhibition as run_create_virtual_exhibition
 from gogol_cli.runner import add_events as run_add_events
@@ -22,6 +23,7 @@ from gogol_cli.runner import pin_event as run_pin_event
 from gogol_cli.runner import xcopy_events as run_xcopy_events
 from gogol_cli.service import parse_xcopy_text
 from gogol_cli.ssh_file_manager import SSHConfig
+from gogol_cli import constants as const
 
 load_dotenv()
 
@@ -260,6 +262,41 @@ def add(
         base_path=ssh_base_path,
     )
     asyncio.run(run_add_events(database_uri, folder, dry_run, ssh_config, inactive))
+
+
+@app.command()
+def books(
+    database_uri: Annotated[str, typer.Option(help="Database URI", envvar="DATABASE_URI")],
+    ssh_host: Annotated[str, typer.Option(help="SSH host", envvar="SSH_HOST")],
+    ssh_username: Annotated[str, typer.Option(help="SSH username", envvar="SSH_USERNAME")],
+    ssh_key_path: Annotated[str, typer.Option(help="SSH key path", envvar="SSH_KEY_PATH")],
+    ssh_base_path: Annotated[str, typer.Option(help="SSH base path", envvar="SSH_BASE_PATH")],
+    folder: Annotated[
+        str,
+        typer.Argument(help="Folder containing a joint .docx file and book cover images"),
+    ],
+    gogol: Annotated[
+        bool,
+        typer.Option(
+            "--gogol",
+            help="Add to Гоголиана (section 146) instead of" " Новые поступления (section 13)",
+        ),
+    ] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
+) -> None:
+    """Add books from a joint .docx to Новые поступления or Гоголиана."""
+    section_id = const.BOOK_SECTION_GOGOLIANA_ID if gogol else const.BOOK_SECTION_NEW_ARRIVALS_ID
+    section_name = "Гоголиана" if gogol else "Новые поступления"
+    typer.echo(f"Target section: {section_name} (id={section_id})")
+
+    uvloop.install()
+    ssh_config = SSHConfig(
+        host=ssh_host,
+        username=ssh_username,
+        key_path=ssh_key_path,
+        base_path=ssh_base_path,
+    )
+    asyncio.run(run_add_books(database_uri, folder, section_id, dry_run, ssh_config))
 
 
 @app.command()

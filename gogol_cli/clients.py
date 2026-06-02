@@ -1008,8 +1008,8 @@ class DatabaseClient:
         section_id: int,
         preview_text: str,
         detail_text: str,
-        preview_picture_id: int,
-        detail_picture_id: int,
+        preview_picture_id: int | None,
+        detail_picture_id: int | None,
         active_from: datetime,
         sort: int,
     ) -> int:

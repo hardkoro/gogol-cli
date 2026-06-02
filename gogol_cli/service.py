@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gogol_cli import constants as const
 from gogol_cli.clients import DatabaseClient
 from gogol_cli.exceptions import GogolCLIException, SSHNotConfiguredError
+from gogol_cli.books.schemas import ParsedBookEntry
 from gogol_cli.exhibition.schemas import ParsedExhibition
 from gogol_cli.schemas import Event
 from gogol_cli.ssh_file_manager import SSHFileManager
@@ -647,6 +648,80 @@ class GogolCLIService:
             exhibition_id,
             len(parsed.books),
         )
+
+    async def add_books(
+        self,
+        books: list[ParsedBookEntry],
+        images: list[tuple[bytes | None, str | None]],
+        section_id: int,
+        active_from: datetime,
+        section_name: str = "",
+    ) -> None:
+        """Add books to an existing section (e.g. Новые поступления or Гоголиана).
+
+        Args:
+            books: Parsed and interactively confirmed book entries.
+            images: Parallel list of (cover_bytes, filename) — None means no image.
+            section_id: Existing b_iblock_section ID to add books under.
+            active_from: Activation timestamp for each book element.
+            section_name: Human-readable section name for log messages.
+        """
+        label = section_name or str(section_id)
+        LOGGER.info("Adding %d books to «%s» ...", len(books), label)
+
+        async with self._db.session() as session:
+            if not self._dry_run and self._ssh is None:
+                raise SSHNotConfiguredError(
+                    "An SSH file manager is required to upload images" " but was not provided."
+                )
+
+            ssh = self._ssh
+
+            for book, (cover_data, cover_filename) in zip(books, images):
+                cover_file_id: int | None = None
+                if cover_data and cover_filename:
+                    resized, w, h = _resize_image(cover_data, const.BOOK_MAX_IMAGE_DIM)
+                    cover_subdir = self._db.generate_new_subdir()
+                    if not self._dry_run:
+                        assert ssh is not None
+                        await ssh.upload_file(resized, cover_subdir, cover_filename)
+                    ct = _content_type(cover_filename)
+                    cover_file_id = await self._db.insert_new_file(
+                        session,
+                        cover_subdir,
+                        cover_filename,
+                        ct,
+                        w,
+                        h,
+                        len(resized),
+                    )
+
+                book_id = await self._db.insert_book_element(
+                    session,
+                    title=book.bib.title,
+                    section_id=section_id,
+                    preview_text=book.preview_text,
+                    detail_text=book.description,
+                    preview_picture_id=cover_file_id,
+                    detail_picture_id=cover_file_id,
+                    active_from=active_from,
+                    sort=book.sort,
+                )
+                await self._db.set_book_properties(
+                    session,
+                    book_id=book_id,
+                    full_bib_text=_php_serialize_bib(book.bib.full_text),
+                    author=book.bib.author,
+                    city=book.bib.city,
+                    publisher=book.bib.publisher,
+                    year=book.bib.year,
+                )
+                LOGGER.info("  Added: %s", book.bib.title)
+
+            if not self._dry_run:
+                await session.commit()
+
+        LOGGER.info("Finished adding %d books to «%s»", len(books), label)
 
     async def create_virtual_exhibition(
         self,

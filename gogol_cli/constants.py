@@ -87,6 +87,13 @@ BOOK_CITY_PROPERTY_ID = 57
 BOOK_PUBLISHER_PROPERTY_ID = 58
 BOOK_YEAR_PROPERTY_ID = 59
 
+# Existing sections for new-arrivals / Gogoliana flows
+BOOK_SECTION_NEW_ARRIVALS_ID = 13  # Новые поступления
+BOOK_SECTION_GOGOLIANA_ID = 146  # Гоголиана
+
+# Image resizing for books
+BOOK_MAX_IMAGE_DIM = 780
+
 # --- Virtual exhibition iblock ---------------------------------------------------
 
 VIRTUAL_EXHIBITION_IBLOCK_ID = 5

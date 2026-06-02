@@ -2,11 +2,14 @@
 
 import os
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import typer
 
+from gogol_cli import constants as const
+from gogol_cli.books.docx_parser import parse_books_file
+from gogol_cli.books.schemas import ParsedBookEntry
 from gogol_cli.clients import DatabaseClient
 from gogol_cli.events.docx_parser import _prompt_event_details, parse_event_file
 from gogol_cli.exhibition.docx_parser import parse_exhibition_folder
@@ -270,6 +273,72 @@ async def _process_single_event(
         )
 
     typer.echo("✓ Event created successfully")
+
+
+def _pair_images_with_books(
+    books: list[ParsedBookEntry],
+    image_files: dict[str, str],
+) -> list[tuple[bytes | None, str | None]]:
+    """Show the proposed alphabetical image→book mapping, confirm, then load bytes."""
+    sorted_images = sorted(image_files.keys())
+
+    typer.echo("\nProposed image → book pairing (alphabetical order):")
+    for i, book in enumerate(books):
+        img_name = sorted_images[i] if i < len(sorted_images) else "(no image)"
+        typer.echo(f"  {i + 1}. {book.bib.title[:55]:<55} → {img_name}")
+
+    use_mapping = typer.confirm("\nUse this alphabetical mapping?", default=True)
+
+    pairs: list[tuple[bytes | None, str | None]] = []
+    for i, book in enumerate(books):
+        if use_mapping and i < len(sorted_images):
+            img_name = sorted_images[i]
+            with open(image_files[img_name], "rb") as f:
+                pairs.append((f.read(), img_name))
+        else:
+            typer.echo(f"\nSelect image for book {i + 1}: {book.bib.title[:60]}")
+            pairs.append(_pick_manual_image(image_files))
+
+    return pairs
+
+
+async def add_books(
+    database_uri: str,
+    folder_path: str,
+    section_id: int,
+    dry_run: bool,
+    ssh_config: SSHConfig,
+) -> None:
+    """Parse the joint .docx and add books to an existing section."""
+    all_docx = [
+        f
+        for f in os.listdir(folder_path)
+        if f.lower().endswith((".doc", ".docx")) and not f.startswith("~$")
+    ]
+    if not all_docx:
+        typer.echo(f"No .doc/.docx files found in {folder_path}")
+        return
+    if len(all_docx) > 1:
+        typer.echo(f"Multiple doc files found; using: {sorted(all_docx)[0]}")
+    docx_path = os.path.join(folder_path, sorted(all_docx)[0])
+
+    books = parse_books_file(docx_path)
+
+    image_files = _collect_image_files(folder_path)
+    images = _pair_images_with_books(books, image_files)
+
+    yesterday_date = datetime.now().date() - timedelta(days=1)
+    active_from = datetime(yesterday_date.year, yesterday_date.month, yesterday_date.day, 15, 0, 0)
+
+    database_client = DatabaseClient(database_uri)
+    ssh_file_manager = SSHFileManager(ssh_config)
+    cli_service = GogolCLIService(database_client, ssh_file_manager, dry_run)
+
+    section_name = (
+        "Гоголиана" if section_id == const.BOOK_SECTION_GOGOLIANA_ID else "Новые поступления"
+    )
+    await cli_service.add_books(books, images, section_id, active_from, section_name)
+    typer.echo(f"\n✓ Added {len(books)} book(s) to «{section_name}»")
 
 
 async def add_events(
