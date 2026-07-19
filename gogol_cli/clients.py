@@ -17,6 +17,10 @@ from gogol_cli.schemas import Event, File
 LOGGER = logging.getLogger(__name__)
 
 
+def _strip_html(s: str | None) -> str:
+    return re.sub(r"<[^>]+>", " ", s or "")
+
+
 class NewEventProperties(TypedDict):
     """Property payload for creating a new event."""
 
@@ -243,7 +247,7 @@ class DatabaseClient:
         detail_picture_id: int,
         new_event_date: datetime,
         new_event_time: str,
-    ) -> int:
+    ) -> tuple[int, str, str]:
         """Insert a copy of an event element with a new date and time.
 
         Args:
@@ -255,7 +259,7 @@ class DatabaseClient:
             new_event_time: The time of the new event in HH-MM format.
 
         Returns:
-            The ID of the newly inserted event element.
+            A tuple of (new event element ID, active_from, active_to).
         """
         now = datetime.now(tz=None).strftime(const.DATETIME_FORMAT)
         hours, minutes = new_event_time.split("-")
@@ -263,9 +267,6 @@ class DatabaseClient:
         active_to = (
             new_event_date + timedelta(hours=int(hours) + 1, minutes=int(minutes))
         ).strftime(const.DATETIME_FORMAT)
-
-        def _strip_html(s: str | None) -> str:
-            return re.sub(r"<[^>]+>", " ", s or "")
 
         searchable_content = " ".join(
             filter(
@@ -315,9 +316,34 @@ class DatabaseClient:
         )
         new_event_id = await DatabaseClient._get_last_insert_id(session)
 
-        # Insert b_search_content so the calendar filter picks up the new event
+        return new_event_id, active_from, active_to
+
+    @staticmethod
+    async def insert_search_content(
+        session: AsyncSession,
+        event_id: int,
+        title: str,
+        preview_text: str | None,
+        detail_text: str | None,
+        tags: str | None,
+        date_from: str,
+        date_to: str,
+    ) -> None:
+        """Insert a b_search_content row so the calendar filter picks up an event.
+
+        Args:
+            session: The active database session.
+            event_id: The ID of the event element (also used as the search item ID).
+            title: The event name.
+            preview_text: The event's preview HTML text.
+            detail_text: The event's detail HTML text.
+            tags: The event's tags.
+            date_from: The event's active-from timestamp, formatted per ``const.DATETIME_FORMAT``.
+            date_to: The event's active-to timestamp, formatted per ``const.DATETIME_FORMAT``.
+        """
+        now = datetime.now(tz=None).strftime(const.DATETIME_FORMAT)
         url = (
-            f"=ID={new_event_id}&EXTERNAL_ID={new_event_id}"
+            f"=ID={event_id}&EXTERNAL_ID={event_id}"
             f"&IBLOCK_SECTION_ID={const.EVENT_IBLOCK_SECTION_ID}"
             f"&IBLOCK_TYPE_ID={const.EVENT_IBLOCK_TYPE_ID}"
             f"&IBLOCK_ID={const.EVENT_IBLOCK_ID}"
@@ -329,8 +355,8 @@ class DatabaseClient:
             filter(
                 None,
                 [
-                    _strip_html(event.preview_text),
-                    _strip_html(event.detail_text),
+                    _strip_html(preview_text),
+                    _strip_html(detail_text),
                 ],
             )
         )
@@ -349,19 +375,17 @@ class DatabaseClient:
             """),
             {
                 "now": now,
-                "item_id": str(new_event_id),
+                "item_id": str(event_id),
                 "url": url,
-                "title": event.name,
+                "title": title,
                 "body": body,
-                "tags": event.tags,
+                "tags": tags,
                 "param1": const.EVENT_IBLOCK_TYPE_ID,
                 "param2": str(const.EVENT_IBLOCK_ID),
-                "date_from": active_from,
-                "date_to": active_to,
+                "date_from": date_from,
+                "date_to": date_to,
             },
         )
-
-        return new_event_id
 
     @staticmethod
     async def set_event_properties(
@@ -562,7 +586,7 @@ class DatabaseClient:
         detail_text: str,
         tags: str | None = None,
         is_active: bool = True,
-    ) -> int:
+    ) -> tuple[int, str, str]:
         """Insert a completely new event element.
 
         Args:
@@ -577,15 +601,12 @@ class DatabaseClient:
             is_active: Whether the event should be active (default: True).
 
         Returns:
-            The ID of the newly inserted event element.
+            A tuple of (new event element ID, active_from, active_to).
         """
         now = datetime.now(tz=None).strftime(const.DATETIME_FORMAT)
 
         # Calculate active_to: 1 hour after the event time
         active_to = (event_date_time + timedelta(hours=1)).strftime(const.DATETIME_FORMAT)
-
-        def _strip_html(s: str | None) -> str:
-            return re.sub(r"<[^>]+>", " ", s or "")
 
         searchable_content = " ".join(
             filter(
@@ -638,53 +659,7 @@ class DatabaseClient:
         )
         new_event_id = await DatabaseClient._get_last_insert_id(session)
 
-        # Insert b_search_content so the calendar filter picks up the new event
-        url = (
-            f"=ID={new_event_id}&EXTERNAL_ID={new_event_id}"
-            f"&IBLOCK_SECTION_ID={const.EVENT_IBLOCK_SECTION_ID}"
-            f"&IBLOCK_TYPE_ID={const.EVENT_IBLOCK_TYPE_ID}"
-            f"&IBLOCK_ID={const.EVENT_IBLOCK_ID}"
-            f"&IBLOCK_CODE={const.EVENT_IBLOCK_CODE}"
-            f"&IBLOCK_EXTERNAL_ID={const.EVENT_IBLOCK_EXTERNAL_ID}"
-            f"&CODE="
-        )
-        body = " ".join(
-            filter(
-                None,
-                [
-                    _strip_html(preview_text),
-                    _strip_html(detail_text),
-                ],
-            )
-        )
-        await session.execute(
-            text("""
-                INSERT INTO b_search_content (
-                    date_change, module_id, item_id, custom_rank,
-                    url, title, body, tags, param1, param2,
-                    date_from, date_to
-                )
-                VALUES (
-                    :now, 'iblock', :item_id, 0,
-                    :url, :title, :body, :tags, :param1, :param2,
-                    :date_from, :date_to
-                )
-            """),
-            {
-                "now": now,
-                "item_id": str(new_event_id),
-                "url": url,
-                "title": name,
-                "body": body,
-                "tags": tags,
-                "param1": const.EVENT_IBLOCK_TYPE_ID,
-                "param2": str(const.EVENT_IBLOCK_ID),
-                "date_from": now,
-                "date_to": active_to,
-            },
-        )
-
-        return new_event_id
+        return new_event_id, now, active_to
 
     @staticmethod
     async def set_new_event_properties(
@@ -1252,6 +1227,9 @@ class DatabaseClient:
         image_file_ids: list[int],
     ) -> None:
         """Insert all properties for one virtual exhibition item."""
+        _lid = DatabaseClient._get_last_insert_id
+
+        # 1. Insert name — its row ID becomes the scp anchor.
         await session.execute(
             text("""
                 INSERT INTO b_iblock_element_property
@@ -1265,29 +1243,54 @@ class DatabaseClient:
                 "name": name,
             },
         )
+        name_row = await _lid(session)
+        scp_description = f"scp_{name_row}"
 
-        result = await session.execute(text("SELECT LAST_INSERT_ID()"))
-        scp_id = result.scalar_one()
-        scp_description = f"scp_{scp_id}"
+        # 2. Back-fill description on the name row (matches working exhibition format).
+        await session.execute(
+            text(
+                "UPDATE b_iblock_element_property"
+                " SET description = :descr WHERE id = :id"
+            ),
+            {"descr": scp_description, "id": name_row},
+        )
 
+        # 3. Bib property.
         await session.execute(
             text("""
                 INSERT INTO b_iblock_element_property
                     (iblock_property_id, iblock_element_id, value, value_type, value_num, description)
                 VALUES
-                    (:prop_bib, :exh_id, :bib_html, 'text', 0.0, :descr),
-                    (:prop_desc, :exh_id, :description_html, 'text', 0.0, :descr)
+                    (:prop_bib, :exh_id, :bib_html, 'text', 0.0, :descr)
             """),
             {
                 "prop_bib": const.VIRTUAL_EXHIBITION_PROP_ITEM_BIB_ID,
-                "prop_desc": const.VIRTUAL_EXHIBITION_PROP_ITEM_DESC_ID,
                 "exh_id": exhibition_id,
                 "bib_html": bib_html,
+                "descr": scp_description,
+            },
+        )
+        bib_row = await _lid(session)
+
+        # 4. Description property.
+        await session.execute(
+            text("""
+                INSERT INTO b_iblock_element_property
+                    (iblock_property_id, iblock_element_id, value, value_type, value_num, description)
+                VALUES
+                    (:prop_desc, :exh_id, :description_html, 'text', 0.0, :descr)
+            """),
+            {
+                "prop_desc": const.VIRTUAL_EXHIBITION_PROP_ITEM_DESC_ID,
+                "exh_id": exhibition_id,
                 "description_html": description_html,
                 "descr": scp_description,
             },
         )
+        desc_row = await _lid(session)
 
+        # 5. Image properties — track each row ID for the link value.
+        img_rows: list[int] = []
         for file_id in image_file_ids:
             await session.execute(
                 text("""
@@ -1304,8 +1307,22 @@ class DatabaseClient:
                     "descr": scp_description,
                 },
             )
+            img_rows.append(await _lid(session))
 
-        link_value = f'a:1:{{s:2:"id";s:{len(str(scp_id))}:"{scp_id}";}}'
+        # 6. Link property — Bitrix uses this to find and group all sub-properties.
+        link_value = _build_scp_link_value(
+            element_id=exhibition_id,
+            prop_name_id=const.VIRTUAL_EXHIBITION_PROP_ITEM_NAME_ID,
+            prop_bib_id=const.VIRTUAL_EXHIBITION_PROP_ITEM_BIB_ID,
+            prop_desc_id=const.VIRTUAL_EXHIBITION_PROP_ITEM_DESC_ID,
+            prop_img_id=const.VIRTUAL_EXHIBITION_PROP_ITEM_IMAGE_ID,
+            name_row=name_row,
+            bib_row=bib_row,
+            desc_row=desc_row,
+            img_rows=img_rows,
+            img_file_ids=image_file_ids,
+            scp_desc=scp_description,
+        )
         await session.execute(
             text("""
                 INSERT INTO b_iblock_element_property
@@ -1320,3 +1337,43 @@ class DatabaseClient:
                 "descr": scp_description,
             },
         )
+
+
+def _build_scp_link_value(
+    element_id: int,
+    prop_name_id: int,
+    prop_bib_id: int,
+    prop_desc_id: int,
+    prop_img_id: int,
+    name_row: int,
+    bib_row: int,
+    desc_row: int,
+    img_rows: list[int],
+    img_file_ids: list[int],
+    scp_desc: str,
+) -> str:
+    """Return the PHP-serialised link value Bitrix expects for a sub-component item.
+
+    Format: a:1:{i:[element_id];a:4:{i:197;a:1:{i:[name_row];s:X:"scp_X";}...}}
+    For image rows the inner value is the file ID string, not the scp anchor.
+    """
+    scp_str = f's:{len(scp_desc)}:"{scp_desc}";'
+
+    def _row_dict(row_ids: list[int]) -> str:
+        entries = "".join(f"i:{r};{scp_str}" for r in row_ids)
+        return f"a:{len(row_ids)}:{{{entries}}}"
+
+    def _img_row_dict(row_ids: list[int], file_ids: list[int]) -> str:
+        entries = "".join(
+            f'i:{r};s:{len(str(fid))}:"{fid}";'
+            for r, fid in zip(row_ids, file_ids)
+        )
+        return f"a:{len(row_ids)}:{{{entries}}}"
+
+    props = (
+        f"i:{prop_name_id};{_row_dict([name_row])}"
+        f"i:{prop_bib_id};{_row_dict([bib_row])}"
+        f"i:{prop_desc_id};{_row_dict([desc_row])}"
+        f"i:{prop_img_id};{_img_row_dict(img_rows, img_file_ids)}"
+    )
+    return f"a:1:{{i:{element_id};a:4:{{{props}}}}}"

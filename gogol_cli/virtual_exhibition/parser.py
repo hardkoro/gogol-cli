@@ -35,10 +35,11 @@ _MIN_WORD_LEN = 4
 _LONG_WORD_THRESHOLD = 30
 _MIN_CYRILLIC_RATIO = 0.10
 _MIN_DATE_MATCHES = 2
-_MAX_BIB_ORIGIN_LEN = 80
+_MAX_BIB_ORIGIN_LEN = 150
 _MAX_BIB_MATERIAL_LEN = 100
 _MAX_ITEM_NAME_LEN = 100
 _MAX_DATE_CONTINUATION_LEN = 40
+_MAX_TITLE_LINE_LEN = 200
 
 
 def _collapse_spaces(text: str) -> str:
@@ -60,7 +61,7 @@ def _is_garbage(text: str) -> bool:
 
 
 _BIB_ORIGIN_RE = re.compile(
-    r"^(СССР|Россия|РСФСР|Франция|Германия|Англия|[А-ЯЁ][а-яё]+)\b.*\b(19|20)\d{2}\b",
+    r"^(СССР|Россия|РСФСР|Франция|Германия|Англия|[А-ЯЁ][а-яё]{2,})\b.*\b\d{4}\b",
     re.IGNORECASE,
 )
 _BIB_MATERIAL_KEYWORDS = (
@@ -113,10 +114,25 @@ def _is_item_terminator(text: str) -> bool:
     return bool(_BIB_SUMMARY_RE.match(text.strip()))
 
 
-def _extract_kp_number(text: str) -> int | None:
-    """Return the КП inventory number from a text string, or None."""
+def _extract_kp_doc_key(text: str) -> str | None:
+    """Return the КП key from a document bib line ('1681' or '995/21')."""
     m = _KP_RE.search(text)
-    return int(m.group(1)) if m else None
+    if m is None:
+        return None
+    base = m.group(1)
+    slash_m = re.search(r"КП[-\s]+\d+\s*/\s*(\w+)", text, re.IGNORECASE)
+    return f"{base}/{slash_m.group(1)}" if slash_m else base
+
+
+def _extract_kp_image_key(filename: str) -> str | None:
+    """Return the КП key from an image filename ('1681' or '995/21')."""
+    m = _KP_RE.search(filename)
+    if m is None:
+        return None
+    base = m.group(1)
+    after = filename[m.end():]
+    digit_m = re.match(r"\s+(\d+)", after)
+    return f"{base}/{digit_m.group(1)}" if digit_m else base
 
 
 # ---------------------------------------------------------------------------
@@ -251,7 +267,7 @@ class _RawItem:
         self.name_lines: list[str] = []
         self.bib_lines: list[str] = []
         self.desc_lines: list[str] = []
-        self.kp_number: int | None = None
+        self.kp_number: str | None = None
 
 
 def _is_bib_index(text: str) -> bool:
@@ -293,6 +309,48 @@ def _split_pending(
     return pending[:i], pending[i:]
 
 
+def _trim_name_lines(
+    name_lines: list[str],
+) -> tuple[list[str], list[str]]:
+    """Return (spillover, trimmed) by discarding lines before the item-number line.
+
+    Exhibition documents number each item with a standalone digit paragraph
+    (e.g. '9', '10').  Any lines preceding that digit in *name_lines* are
+    description text that spilled over from the previous item (short Gogol
+    quotes, chapter references like '(Т. I, Гл. 2)', etc.).
+    """
+    for i, line in enumerate(name_lines):
+        if re.match(r"^\d+\s*$", line.strip()):
+            return name_lines[:i], name_lines[i:]
+    return [], name_lines
+
+
+def _split_pending_kp(
+    pending: list[str],
+) -> tuple[list[str], list[str], list[str]]:
+    """Split pending when a КП line (not an origin line) triggers a new item.
+
+    Returns (pre_lines, bib_pre_lines, name_lines):
+    - bib_pre_lines: material/technique lines at the tail (before the КП trigger)
+    - name_lines: name-like lines just before the bib_pre_lines
+    - pre_lines: everything else → previous item description or body
+
+    Unlike _split_pending, this also peels off material lines that precede the
+    КП number but weren't detected as bib lines (e.g., long material strings).
+    """
+    # Step 1: peel off material-keyword lines at the tail.
+    i = len(pending)
+    while i > 0 and any(kw in pending[i - 1].lower() for kw in _BIB_MATERIAL_KEYWORDS):
+        i -= 1
+    bib_pre = pending[i:]
+
+    # Step 2: peel off name lines just before the material section.
+    j = i
+    while j > 0 and _looks_like_item_name(pending[j - 1]):
+        j -= 1
+    return pending[:j], bib_pre, pending[j:i]
+
+
 def _parse_document(  # noqa: PLR0912, PLR0915
     paragraphs: list[str],
 ) -> tuple[str, str, datetime | None, datetime | None, list[str], list[_RawItem]]:
@@ -314,33 +372,32 @@ def _parse_document(  # noqa: PLR0912, PLR0915
     if idx < len(clean) and re.search(r"виртуальная\s+выставка", clean[idx], re.IGNORECASE):
         idx += 1
 
-    # -- Title: take the next 1–2 paragraphs --
-    # Always take the first paragraph as title.  If the line that immediately
-    # follows is short (≤ 40 chars, typically a standalone date), include it too
-    # so that date extraction works on the combined string.
+    # -- Title: accumulate lines until a standalone date line, a bib line, or body text --
+    active_from: datetime | None = None
+    active_to: datetime | None = None
     title_parts: list[str] = []
     while (
         idx < len(clean) and not _is_bib_line(clean[idx]) and not _is_item_terminator(clean[idx])
     ):
         text = clean[idx]
+        # A line that parses as a date range is the exhibition date, not the title.
+        d1, d2 = _extract_dates(text)
+        if d1 is not None:
+            active_from = d1
+            active_to = d2
+            idx += 1
+            break
+        # A very long line is body text — stop without consuming it.
+        if len(text.strip()) > _MAX_TITLE_LINE_LEN:
+            break
         title_parts.append(text)
         idx += 1
-        if len(title_parts) == 1:
-            # Take a second line only if it looks like a short date continuation
-            if (
-                idx < len(clean)
-                and len(clean[idx].strip()) < _MAX_DATE_CONTINUATION_LEN
-                and not _is_bib_line(clean[idx])
-            ):
-                continue  # will pick up line 2 on the next iteration
-            else:
-                break
-        else:
-            break
 
     raw_title = " ".join(title_parts)
     raw_title = re.sub(r"^[^А-ЯЁа-яёA-Za-z«»\"]+", "", raw_title).strip()
-    active_from, active_to = _extract_dates(raw_title)
+    # Fallback: extract dates embedded in the title text (older document format).
+    if active_from is None:
+        active_from, active_to = _extract_dates(raw_title)
     raw_title_clean = _strip_dates(raw_title)
 
     # -- Body + Items --
@@ -365,20 +422,43 @@ def _parse_document(  # noqa: PLR0912, PLR0915
             break
 
         if _is_bib_origin(text):
-            # --- Start of a new item's bib section ---
+            # --- Start of a new item's bib section (origin line trigger) ---
             pre, name_lines = _split_pending(pending)
+            spill, name_lines = _trim_name_lines(name_lines)
             pending = []
 
             if current is None:
-                body.extend(pre)
+                body.extend(pre + spill)
             else:
-                current.desc_lines.extend(pre)
+                current.desc_lines.extend(pre + spill)
 
             current = _RawItem()
             raw_items.append(current)
             current.name_lines = name_lines
 
-            kp = _extract_kp_number(text)
+            kp = _extract_kp_doc_key(text)
+            if kp is not None:
+                current.kp_number = kp
+            current.bib_lines.append(text)
+            in_bib = True
+
+        elif bool(_KP_RE.search(text)) and not in_bib:
+            # --- КП line outside a bib section: item without an origin line ---
+            pre, bib_pre, name_lines = _split_pending_kp(pending)
+            spill, name_lines = _trim_name_lines(name_lines)
+            pending = []
+
+            if current is None:
+                body.extend(pre + spill)
+            else:
+                current.desc_lines.extend(pre + spill)
+
+            current = _RawItem()
+            raw_items.append(current)
+            current.name_lines = name_lines
+            current.bib_lines.extend(bib_pre)
+
+            kp = _extract_kp_doc_key(text)
             if kp is not None:
                 current.kp_number = kp
             current.bib_lines.append(text)
@@ -387,7 +467,7 @@ def _parse_document(  # noqa: PLR0912, PLR0915
         elif _is_bib_line(text):
             # Non-origin bib line (material, КП number, dimensions …)
             if current is not None and in_bib:
-                kp = _extract_kp_number(text)
+                kp = _extract_kp_doc_key(text)
                 if kp is not None and current.kp_number is None:
                     current.kp_number = kp
                 current.bib_lines.append(text)
@@ -419,27 +499,27 @@ def _parse_document(  # noqa: PLR0912, PLR0915
 
 def _load_images(
     folder_path: str,
-) -> tuple[tuple[bytes, str] | None, dict[int, list[tuple[bytes, str]]]]:
+) -> tuple[tuple[bytes, str] | None, dict[str, list[tuple[bytes, str]]]]:
     """Load images from the exhibition folder.
 
     Returns:
         preview: (data, filename) for the non-КП preview image, or None
-        kp_images: mapping from КП number → list of (data, filename)
+        kp_images: mapping from КП key ('1681' or '995/21') → list of (data, filename)
     """
     image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
     preview: tuple[bytes, str] | None = None
-    kp_images: dict[int, list[tuple[bytes, str]]] = {}
+    kp_images: dict[str, list[tuple[bytes, str]]] = {}
 
     for fname in sorted(os.listdir(folder_path)):
         ext = os.path.splitext(fname)[1].lower()
         if ext not in image_exts:
             continue
-        kp_num = _extract_kp_number(fname)
+        kp_key = _extract_kp_image_key(fname)
         filepath = os.path.join(folder_path, fname)
         with open(filepath, "rb") as fh:
             data = fh.read()
-        if kp_num is not None:
-            kp_images.setdefault(kp_num, []).append((data, fname))
+        if kp_key is not None:
+            kp_images.setdefault(kp_key, []).append((data, fname))
         elif preview is None:
             # Non-КП image — use as exhibition preview/detail
             preview = (data, fname)
@@ -489,14 +569,34 @@ def _prompt_name_and_subtitle(raw_title: str) -> tuple[str, str]:
     """
     typer.echo(f"\nRaw exhibition title from document:\n  {raw_title}")
 
-    # Suggest a split at the first '. ' that is not at the very start
-    dot_idx = raw_title.find(". ", 5)
-    if dot_idx != -1:
-        short = raw_title[:dot_idx]
-        suggested_sub = raw_title[dot_idx + 2 :].strip()
-    else:
-        short = raw_title
-        suggested_sub = ""
+    # Prefer '... ' / '… ' (ellipsis) as a split point; fall back to '. '
+    # while skipping abbreviation dots (word before the dot is a single letter).
+    short = raw_title
+    suggested_sub = ""
+    found = False
+    for ell in ("... ", "… "):
+        idx = raw_title.find(ell, 5)
+        if idx != -1:
+            # Keep the ellipsis in the short title.
+            short = raw_title[: idx + len(ell) - 1]
+            suggested_sub = raw_title[idx + len(ell) :].strip()
+            found = True
+            break
+    if not found:
+        pos = 5
+        while True:
+            idx = raw_title.find(". ", pos)
+            if idx == -1:
+                break
+            # Find the word ending at the dot.
+            word_start = idx - 1
+            while word_start > 0 and raw_title[word_start - 1] not in " .,":
+                word_start -= 1
+            if idx - word_start > 1:  # multi-char word → real sentence end
+                short = raw_title[:idx]
+                suggested_sub = raw_title[idx + 2 :].strip()
+                break
+            pos = idx + 1
 
     # Wrap the short title in quotes and prepend the section name
     suggested_name = f"{_VYSTAVKA_PREFIX} \u00ab{short}\u00bb"
@@ -535,7 +635,7 @@ def _prompt_dates(
     return confirmed_from, confirmed_to
 
 
-def _prompt_item_name(raw_name: str, kp_number: int | None, item_index: int) -> str:
+def _prompt_item_name(raw_name: str, kp_number: str | None, item_index: int) -> str:
     """Ask the user to confirm or enter the item name."""
     typer.echo(f"\n--- Item {item_index} (КП {kp_number}) ---")
     default_name = raw_name if raw_name else (f"КП {kp_number}" if kp_number else "")
@@ -596,7 +696,11 @@ def parse_virtual_exhibition_folder(folder_path: str) -> ParsedVirtualExhibition
 
     # -- Build items --
     # Sort КП image groups by number for deterministic matching
-    sorted_kp = sorted(kp_images.items())  # list of (kp_number, [(data, fname), ...])
+    def _kp_sort_key(k: str) -> tuple[int, int]:
+        parts = k.split("/", 1)
+        return (int(parts[0]), int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0)
+
+    sorted_kp = sorted(kp_images.items(), key=lambda kv: _kp_sort_key(kv[0]))
 
     # Match items to images by КП number if possible, otherwise by order
     items: list[ParsedVirtualExhibitionItem] = []

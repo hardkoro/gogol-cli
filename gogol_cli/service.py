@@ -1,12 +1,15 @@
 """Gogol CLI service."""
 
+import asyncio
+import functools
 import io
 import logging
 import re
 from datetime import date, datetime, timedelta
-from typing import TypedDict
+from typing import Awaitable, Callable, ParamSpec, TypedDict, TypeVar
 
 from PIL import Image
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gogol_cli import constants as const
@@ -19,6 +22,48 @@ from gogol_cli.ssh_file_manager import SSHFileManager
 from gogol_cli.virtual_exhibition.schemas import ParsedVirtualExhibition
 
 LOGGER = logging.getLogger(__name__)
+
+# MySQL error codes for dropped/lost connections (safe to retry: nothing was committed).
+_RETRYABLE_MYSQL_ERROR_CODES = {2002, 2003, 2006, 2013}
+_MAX_DB_RETRIES = 3
+_DB_RETRY_DELAY_SECONDS = 3.0
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+
+
+def _is_retryable_db_error(exc: BaseException) -> bool:
+    if not isinstance(exc, DBAPIError):
+        return False
+    error_code = getattr(exc.orig, "args", (None,))[0]
+    return error_code in _RETRYABLE_MYSQL_ERROR_CODES
+
+
+def _with_db_retry(func: Callable[_P, Awaitable[_T]]) -> Callable[_P, Awaitable[_T]]:
+    """Retry a whole service call if it fails due to a dropped DB connection.
+
+    Each call opens (and, on success, commits) its own session, so a fresh
+    attempt from scratch is safe — nothing from the failed attempt was committed.
+    """
+
+    @functools.wraps(func)
+    async def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        for attempt in range(1, _MAX_DB_RETRIES + 1):
+            try:
+                return await func(*args, **kwargs)
+            except DBAPIError as exc:
+                if attempt == _MAX_DB_RETRIES or not _is_retryable_db_error(exc):
+                    raise
+                LOGGER.warning(
+                    "Database connection lost (attempt %d/%d), retrying in %.0fs ...",
+                    attempt,
+                    _MAX_DB_RETRIES,
+                    _DB_RETRY_DELAY_SECONDS,
+                )
+                await asyncio.sleep(_DB_RETRY_DELAY_SECONDS)
+        raise AssertionError("unreachable")
+
+    return wrapper
 
 
 class EventData(TypedDict):
@@ -201,6 +246,51 @@ class GogolCLIService:
 
         return await self._db.insert_file_copy(session, picture_id, new_subdir)
 
+    async def _index_search_content(
+        self,
+        event_id: int,
+        title: str,
+        preview_text: str | None,
+        detail_text: str | None,
+        tags: str | None,
+        active_from: str,
+        active_to: str,
+    ) -> None:
+        """Best-effort: index the event so the calendar's search filter picks it up.
+
+        The event element itself is already committed by the time this runs. The
+        b_search_content INSERT has been observed to reliably drop the remote MySQL
+        connection on this host, so it gets its own session and retry budget and is
+        allowed to fail without rolling back or blocking the rest of the operation —
+        worst case the event just doesn't show up in the calendar filter until
+        re-indexed by hand.
+        """
+        for attempt in range(1, _MAX_DB_RETRIES + 1):
+            try:
+                async with self._db.session() as session:
+                    await self._db.insert_search_content(
+                        session, event_id, title, preview_text, detail_text, tags,
+                        active_from, active_to,
+                    )
+                    await session.commit()
+                return
+            except DBAPIError as exc:
+                if attempt == _MAX_DB_RETRIES or not _is_retryable_db_error(exc):
+                    LOGGER.error(
+                        "Could not index event %d for the calendar search filter "
+                        "(attempt %d/%d); the event was created but may not appear "
+                        "in the calendar until reindexed: %s",
+                        event_id, attempt, _MAX_DB_RETRIES, exc,
+                    )
+                    return
+                LOGGER.warning(
+                    "Search indexing for event %d lost its DB connection "
+                    "(attempt %d/%d), retrying in %.0fs ...",
+                    event_id, attempt, _MAX_DB_RETRIES, _DB_RETRY_DELAY_SECONDS,
+                )
+                await asyncio.sleep(_DB_RETRY_DELAY_SECONDS)
+
+    @_with_db_retry
     async def pin_event(self, event: Event) -> None:
         """Create a pin element for the given event, copying its preview picture.
 
@@ -219,6 +309,7 @@ class GogolCLIService:
 
         LOGGER.info("Finished pinning event %s", event.id)
 
+    @_with_db_retry
     async def copy_event(
         self,
         event: Event,
@@ -248,7 +339,7 @@ class GogolCLIService:
             preview_picture_id = await self._copy_picture(session, event.preview_picture)
             detail_picture_id = await self._copy_picture(session, event.detail_picture)
 
-            new_event_id = await self._db.insert_event_copy(
+            new_event_id, active_from, active_to = await self._db.insert_event_copy(
                 session,
                 event,
                 preview_picture_id,
@@ -271,6 +362,17 @@ class GogolCLIService:
             if not self._dry_run:
                 await session.commit()
 
+        if not self._dry_run:
+            await self._index_search_content(
+                new_event_id,
+                event.name,
+                event.preview_text,
+                event.detail_text,
+                event.tags,
+                active_from,
+                active_to,
+            )
+
         time_display = new_event_time_str.replace("-", ":")
         LOGGER.info(
             "Finished copying event %s to %s at %s",
@@ -279,6 +381,7 @@ class GogolCLIService:
             time_display,
         )
 
+    @_with_db_retry
     async def add_event(
         self,
         event_data: EventData,
@@ -359,7 +462,7 @@ class GogolCLIService:
                 parsed_tags.append("Бесплатно")
             normalized_tags = ", ".join(parsed_tags) if parsed_tags else None
 
-            new_event_id = await self._db.insert_new_event(
+            new_event_id, active_from, active_to = await self._db.insert_new_event(
                 session,
                 name=name,
                 event_date_time=event_date_time,
@@ -415,6 +518,17 @@ class GogolCLIService:
 
             if not self._dry_run:
                 await session.commit()
+
+        if not self._dry_run:
+            await self._index_search_content(
+                new_event_id,
+                name,
+                preview_text,
+                description_html,
+                normalized_tags,
+                active_from,
+                active_to,
+            )
 
         LOGGER.info(
             "Finished creating new event '%s' (id=%d) on %s at %s — https://www.domgogolya.ru/recital/%d/",
@@ -527,6 +641,7 @@ class GogolCLIService:
 
         return start_date, next_month_start_date
 
+    @_with_db_retry
     async def copy_chronograph(self, month_number: int, year_suffix: str) -> None:
         """Create a new chronograph section and copy entries from 5 years ago."""
         LOGGER.info("Copying chronograph for %s/%s ...", month_number, year_suffix)
@@ -551,6 +666,7 @@ class GogolCLIService:
 
         LOGGER.info("Finished copying chronograph for %s/%s", month_number, year_suffix)
 
+    @_with_db_retry
     async def create_exhibition(
         self,
         parsed: ParsedExhibition,
@@ -649,6 +765,7 @@ class GogolCLIService:
             len(parsed.books),
         )
 
+    @_with_db_retry
     async def add_books(
         self,
         books: list[ParsedBookEntry],
@@ -723,6 +840,7 @@ class GogolCLIService:
 
         LOGGER.info("Finished adding %d books to «%s»", len(books), label)
 
+    @_with_db_retry
     async def create_virtual_exhibition(
         self,
         parsed: ParsedVirtualExhibition,

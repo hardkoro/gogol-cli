@@ -15,7 +15,7 @@ class ParsedVirtualExhibitionItem(BaseModel):
     name: str
     bib_text: str  # HTML for prop 198 (origin, materials, indices joined)
     description: str  # HTML for prop 199 (optional editorial description)
-    kp_number: int | None  # КП inventory number extracted from the bib indices line
+    kp_number: str | None  # КП key from bib indices, e.g. '1681' or '995/21'
     images: list[tuple[bytes, str]]  # (image_bytes, filename) for prop 200
 
 
