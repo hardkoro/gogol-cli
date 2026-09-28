@@ -108,6 +108,31 @@ def _is_author_line(text: str) -> bool:
     return bool(re.match(r"^\w[\w\s]*,\s+\w", text))
 
 
+def _is_isbn_line(text: str) -> bool:
+    """Detect a standalone 'ISBN 978-...' line."""
+    return bool(re.match(r"^ISBN\b", text.strip(), re.IGNORECASE))
+
+
+def _extract_isbn(paragraphs: list[str]) -> tuple[list[str], list[str]]:
+    """Split *paragraphs* into (isbn_lines, remaining_paragraphs).
+
+    ISBN paragraphs belong in the bib record, not the description, so
+    callers append them to ``BibInfo.full_text`` and drop them from the
+    description paragraphs.
+    """
+    isbn_lines = [p for p in paragraphs if _is_isbn_line(p)]
+    rest = [p for p in paragraphs if not _is_isbn_line(p)]
+    return isbn_lines, rest
+
+
+def _append_isbn_to_bib(bib: BibInfo, isbn_lines: list[str]) -> BibInfo:
+    """Return *bib* with any ISBN lines appended to its full-text bib record."""
+    if not isbn_lines:
+        return bib
+    full_text = " ".join([bib.full_text, *isbn_lines])
+    return bib.model_copy(update={"full_text": full_text})
+
+
 # ---------------------------------------------------------------------------
 # Bib parsing
 # ---------------------------------------------------------------------------
@@ -303,7 +328,8 @@ def _parse_book_file(path: str, sort: int) -> ParsedBook:
         bib_line = paragraphs[0] if paragraphs else ""
         desc_paragraphs = paragraphs[1:]
 
-    bib = _parse_bib(author_line, bib_line)
+    isbn_lines, desc_paragraphs = _extract_isbn(desc_paragraphs)
+    bib = _append_isbn_to_bib(_parse_bib(author_line, bib_line), isbn_lines)
     description = _paragraphs_to_html(desc_paragraphs)
     preview_text = f"<p>{_first_sentence(desc_paragraphs[0])}</p>" if desc_paragraphs else ""
 

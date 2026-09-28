@@ -1,6 +1,8 @@
 """Schemas for SSH File Manager."""
 
-from pydantic import BaseModel
+import os
+
+from pydantic import BaseModel, field_validator
 
 
 class SSHConfig(BaseModel):
@@ -10,6 +12,12 @@ class SSHConfig(BaseModel):
     username: str
     key_path: str
     base_path: str
+
+    @field_validator("key_path")
+    @classmethod
+    def _expand_key_path(cls, value: str) -> str:
+        """Expand `~` in the key path, since asyncssh treats it as a literal filesystem path."""
+        return os.path.expanduser(value)
 
     @property
     def is_valid(self) -> bool:

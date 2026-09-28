@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import typer
+from PIL import Image
 
 from gogol_cli import constants as const
 from gogol_cli.books.docx_parser import parse_books_file
@@ -14,6 +15,7 @@ from gogol_cli.clients import DatabaseClient
 from gogol_cli.events.docx_parser import _prompt_event_details, parse_event_file
 from gogol_cli.exhibition.docx_parser import parse_exhibition_folder
 from gogol_cli.exceptions import EmailConfigError, SMTPConfigError
+from gogol_cli.news.docx_parser import parse_news_file
 from gogol_cli.exporters import AbstractExporter, PlainExporter, SMTPExporter
 from gogol_cli.exporters.smtp import EmailConfig, SMTPConfig
 from gogol_cli.service import GogolCLIService, EventData
@@ -103,10 +105,12 @@ async def copy_chronograph(
     month_number: int,
     year_suffix: str,
     dry_run: bool,
+    ssh_config: SSHConfig,
 ) -> None:
     """Run the script."""
     database_client = DatabaseClient(database_uri)
-    cli_service = GogolCLIService(database_client, dry_run=dry_run)
+    ssh_file_manager = SSHFileManager(ssh_config)
+    cli_service = GogolCLIService(database_client, ssh_file_manager, dry_run)
 
     await cli_service.copy_chronograph(month_number, year_suffix)
 
@@ -341,6 +345,91 @@ async def add_books(
     typer.echo(f"\n✓ Added {len(books)} book(s) to «{section_name}»")
 
 
+def _select_news_images(
+    image_files: dict[str, str],
+) -> tuple[tuple[bytes, str], list[tuple[bytes, str]]]:
+    """Pick the preview image and the gallery images out of *image_files*.
+
+    With a single image, it becomes the preview and the gallery stays empty.
+    With multiple images, the alphabetically-first one is proposed as the preview;
+    the user confirms it (or picks another one manually) and separately confirms
+    whether that same image should *also* be added to the gallery. Every other
+    image is always added to the gallery.
+    """
+    sorted_names = sorted(image_files.keys())
+
+    def _read(name: str) -> bytes:
+        with open(image_files[name], "rb") as f:
+            return f.read()
+
+    if len(sorted_names) == 1:
+        only = sorted_names[0]
+        return (_read(only), only), []
+
+    first = sorted_names[0]
+    use_first = typer.confirm(
+        f"\nUse '{first}' (alphabetically first) as the preview image?", default=True
+    )
+
+    if use_first:
+        preview_name = first
+        also_gallery = typer.confirm(f"Also add '{first}' to the gallery?", default=False)
+        gallery_names = sorted_names[1:]
+        if also_gallery:
+            gallery_names = [first, *gallery_names]
+    else:
+        typer.echo("\nSelect the preview image:")
+        preview_data, preview_name = _pick_manual_image(image_files)
+        if preview_name is None or preview_data is None:
+            raise ValueError("A preview image is required to add news.")
+        gallery_names = [n for n in sorted_names if n != preview_name]
+        return (preview_data, preview_name), [(_read(n), n) for n in gallery_names]
+
+    return (_read(preview_name), preview_name), [(_read(n), n) for n in gallery_names]
+
+
+async def add_news(
+    database_uri: str,
+    folder_path: str,
+    dry_run: bool,
+    ssh_config: SSHConfig,
+    partners: bool = False,
+) -> None:
+    """Parse a folder's .docx and images and add a news entry."""
+    all_docx = [
+        f
+        for f in os.listdir(folder_path)
+        if f.lower().endswith((".doc", ".docx")) and not f.startswith("~$")
+    ]
+    if not all_docx:
+        typer.echo(f"No .doc/.docx files found in {folder_path}")
+        return
+    if len(all_docx) > 1:
+        typer.echo(f"Multiple doc files found; using: {sorted(all_docx)[0]}")
+    docx_path = os.path.join(folder_path, sorted(all_docx)[0])
+
+    parsed = parse_news_file(docx_path)
+
+    image_files = _collect_image_files(folder_path)
+    if not image_files:
+        typer.echo(f"No images found in {folder_path}")
+        return
+
+    preview_image, gallery_images = _select_news_images(image_files)
+
+    tags = const.NEWS_TAG_PARTNERS if partners else const.NEWS_TAG_DEFAULT
+    active_from = datetime.now()
+
+    database_client = DatabaseClient(database_uri)
+    ssh_file_manager = SSHFileManager(ssh_config)
+    cli_service = GogolCLIService(database_client, ssh_file_manager, dry_run)
+
+    news_id = await cli_service.add_news(
+        parsed, preview_image, gallery_images, tags, active_from
+    )
+    typer.echo(f"\n✓ Added news «{parsed.title}» (id={news_id}, tags={tags})")
+
+
 async def add_events(
     database_uri: str,
     folder_path: str,
@@ -370,3 +459,42 @@ async def add_events(
             image_files=image_files,
             force_inactive=inactive,
         )
+
+
+def resize_images(folder_path: str, dry_run: bool) -> None:
+    """Convert every image in *folder_path* to JPG, resized so its largest side is 780px.
+
+    Images already in JPG format are resized in place. Images converted from
+    another format (PNG, TIFF, ...) are saved under the same base name with a
+    .jpg extension, and the original file is removed.
+    """
+    folder = Path(folder_path)
+    max_dim = const.LOCAL_IMAGE_MAX_DIM
+
+    for fname in sorted(os.listdir(folder_path)):
+        ext = os.path.splitext(fname)[1].lower()
+        if ext not in const.LOCAL_IMAGE_EXTS:
+            continue
+
+        src_path = folder / fname
+        dest_path = folder / f"{src_path.stem}.jpg"
+        # On case-insensitive filesystems (e.g. macOS default), "a.JPG" and "a.jpg"
+        # name the same file even though the Path strings differ.
+        same_file = dest_path.exists() and os.path.samefile(src_path, dest_path)
+
+        with Image.open(src_path) as img:
+            img = img.convert("RGB")
+            w, h = img.size
+            scale = max_dim / max(w, h)
+            new_w, new_h = max(1, round(w * scale)), max(1, round(h * scale))
+            resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+        if dry_run:
+            typer.echo(f"[dry-run] {fname} -> {dest_path.name} ({new_w}x{new_h})")
+            continue
+
+        resized.save(dest_path, format="JPEG", quality=90)
+        if not same_file and src_path.exists():
+            src_path.unlink()
+
+        typer.echo(f"{fname} -> {dest_path.name} ({new_w}x{new_h})")

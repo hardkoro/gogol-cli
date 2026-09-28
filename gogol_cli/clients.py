@@ -2,6 +2,7 @@
 
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from itertools import count
 from typing import TypedDict
@@ -19,6 +20,38 @@ LOGGER = logging.getLogger(__name__)
 
 def _strip_html(s: str | None) -> str:
     return re.sub(r"<[^>]+>", " ", s or "")
+
+
+# Matches Bitrix's default transliteration table (CUtil::translit), used to build
+# the news element CODE that its detail page URL (#ELEMENT_CODE#) depends on.
+_TRANSLIT_TABLE = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
+    "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+    "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+    "ф": "f", "х": "kh", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "shch",
+    "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya",
+}
+
+
+def _transliterate(text: str) -> str:
+    """Transliterate Cyrillic characters to Latin, preserving case."""
+    result = []
+    for ch in text:
+        lower = ch.lower()
+        mapped = _TRANSLIT_TABLE.get(lower)
+        if mapped is None:
+            result.append(ch)
+            continue
+        if ch.isupper() and mapped:
+            mapped = mapped[0].upper() + mapped[1:]
+        result.append(mapped)
+    return "".join(result)
+
+
+def _slugify_title(title: str) -> str:
+    """Build a Bitrix-style element CODE from *title* (transliterate, strip non-alnum)."""
+    transliterated = _transliterate(title)
+    return re.sub(r"[^0-9A-Za-z]", "", transliterated)
 
 
 class NewEventProperties(TypedDict):
@@ -43,7 +76,12 @@ class DatabaseClient:
         Args:
             database_uri: Database URI.
         """
-        self._engine = create_async_engine(database_uri, echo=False)
+        # pool_pre_ping: validate a pooled connection with a cheap SELECT 1 before
+        # handing it out, so a connection dropped by the (flaky, shared-hosting) MySQL
+        # server between statements gets discarded instead of being reused as-is on
+        # the next checkout — otherwise a retry can be handed back the same dead
+        # connection and fail identically every time.
+        self._engine = create_async_engine(database_uri, echo=False, pool_pre_ping=True)
         self._session_maker = async_sessionmaker(self._engine)
 
     def session(self) -> AsyncSession:
@@ -480,6 +518,14 @@ class DatabaseClient:
             """),
             {"section_id": section_id, "element_id": element_id},
         )
+        # Bitrix's own CIBlockElement::Add() sets this flag whenever an element
+        # gets a b_iblock_section_element row; leaving it at the column default
+        # ('N') makes the admin's "Sections" checkbox tree render this element's
+        # section as unchecked, which then wipes it on the next save.
+        await session.execute(
+            text("UPDATE b_iblock_element SET in_sections = 'Y' WHERE id = :element_id"),
+            {"element_id": element_id},
+        )
 
     @staticmethod
     async def insert_new_file(
@@ -832,41 +878,97 @@ class DatabaseClient:
         session: AsyncSession,
         source_section_id: int,
         destination_section_id: int,
+        active_from: datetime,
+        active_to: datetime,
+        copy_picture: Callable[[AsyncSession, int], Awaitable[int]],
     ) -> None:
-        """Copy chronograph section elements and shift year property."""
+        """Copy chronograph section elements, their pictures, properties, and shift the year.
+
+        Args:
+            session: The active database session.
+            source_section_id: The section to copy elements from.
+            destination_section_id: The section to copy elements into.
+            active_from: The active-from date to set on every copied element.
+            active_to: The active-to date to set on every copied element.
+            copy_picture: Async callback that duplicates a b_file record (and its physical
+                file) and returns the new file ID.
+        """
         LOGGER.info(
             "Copying chronograph section %s into %s ...",
             source_section_id,
             destination_section_id,
         )
 
-        await session.execute(
-            text("""
-                INSERT INTO b_iblock_element (
-                    timestamp_x, modified_by, date_create, created_by,
-                    iblock_id, iblock_section_id, active, active_from, active_to,
-                    sort, name, preview_picture, preview_text, preview_text_type,
-                    detail_picture, detail_text, detail_text_type,
-                    searchable_content, tmp_id, code
-                )
-                SELECT
-                    NOW(), modified_by, NOW(), created_by,
-                    iblock_id, :dst_section_id, active, active_from, active_to,
-                    sort, name, preview_picture, preview_text, preview_text_type,
-                    detail_picture, detail_text, detail_text_type,
-                    searchable_content, 0, code
-                FROM b_iblock_element
-                WHERE iblock_section_id = :src_section_id
-            """),
-            {
-                "src_section_id": source_section_id,
-                "dst_section_id": destination_section_id,
-            },
-        )
+        active_from_str = active_from.strftime(const.DATETIME_FORMAT)
+        active_to_str = active_to.strftime(const.DATETIME_FORMAT)
 
-        for element_id in await DatabaseClient._get_affected_elements(
-            session, destination_section_id
+        for source_element_id in await DatabaseClient._get_affected_elements(
+            session, source_section_id
         ):
+            pictures_result = await session.execute(
+                text("""
+                    SELECT preview_picture, detail_picture
+                    FROM b_iblock_element
+                    WHERE id = :src_element_id
+                """),
+                {"src_element_id": source_element_id},
+            )
+            pictures_row = pictures_result.fetchone()
+            assert pictures_row is not None
+            old_preview_picture, old_detail_picture = pictures_row
+
+            new_preview_picture = await copy_picture(session, old_preview_picture)
+            new_detail_picture = await copy_picture(session, old_detail_picture)
+
+            await session.execute(
+                text("""
+                    INSERT INTO b_iblock_element (
+                        timestamp_x, modified_by, date_create, created_by,
+                        iblock_id, iblock_section_id, active, active_from, active_to,
+                        sort, name, preview_picture, preview_text, preview_text_type,
+                        detail_picture, detail_text, detail_text_type,
+                        searchable_content, tmp_id, code
+                    )
+                    SELECT
+                        NOW(), modified_by, NOW(), created_by,
+                        iblock_id, :dst_section_id, 'Y', :active_from, :active_to,
+                        sort, name, :new_preview_picture, preview_text, preview_text_type,
+                        :new_detail_picture, detail_text, detail_text_type,
+                        searchable_content, 0, code
+                    FROM b_iblock_element
+                    WHERE id = :src_element_id
+                """),
+                {
+                    "src_element_id": source_element_id,
+                    "dst_section_id": destination_section_id,
+                    "active_from": active_from_str,
+                    "active_to": active_to_str,
+                    "new_preview_picture": new_preview_picture,
+                    "new_detail_picture": new_detail_picture,
+                },
+            )
+            new_element_id = await DatabaseClient._get_last_insert_id(session)
+
+            await session.execute(
+                text("UPDATE b_iblock_element SET xml_id = :new_id WHERE id = :new_id"),
+                {"new_id": new_element_id},
+            )
+
+            await DatabaseClient.add_element_to_section(
+                session, new_element_id, destination_section_id
+            )
+
+            await session.execute(
+                text("""
+                    INSERT INTO b_iblock_element_property
+                        (iblock_property_id, iblock_element_id, value, value_type, value_enum, value_num, description)
+                    SELECT iblock_property_id, :new_id, value, value_type, value_enum, value_num, description
+                    FROM b_iblock_element_property
+                    WHERE iblock_element_id = :old_id
+                """),
+                {"new_id": new_element_id, "old_id": source_element_id},
+            )
+
             await session.execute(
                 text("""
                     UPDATE b_iblock_element_property
@@ -876,7 +978,7 @@ class DatabaseClient:
                 """),
                 {
                     "year_offset": const.CHRONOGRAPH_YEAR_OFFSET,
-                    "element_id": element_id,
+                    "element_id": new_element_id,
                     "prop_id": const.CHRONOGRAPH_YEAR_PROPERTY_ID,
                 },
             )
@@ -1025,14 +1127,7 @@ class DatabaseClient:
             text("UPDATE b_iblock_element SET xml_id = :id WHERE id = :id"),
             {"id": element_id},
         )
-        await session.execute(
-            text("""
-                INSERT INTO b_iblock_section_element
-                    (iblock_section_id, iblock_element_id, additional_property_id)
-                VALUES (:section_id, :element_id, NULL)
-            """),
-            {"section_id": section_id, "element_id": element_id},
-        )
+        await DatabaseClient.add_element_to_section(session, element_id, section_id)
         return element_id
 
     @staticmethod
@@ -1105,6 +1200,158 @@ class DatabaseClient:
                 "year": year,
                 "year_num": year_num,
             },
+        )
+
+    @staticmethod
+    async def generate_unique_news_code(session: AsyncSession, title: str) -> str:
+        """Build a Bitrix-style CODE from *title*, disambiguating against existing codes."""
+        base_code = _slugify_title(title) or "News"
+        code = base_code
+        suffix = 2
+        while await DatabaseClient.news_code_exists(session, code):
+            code = f"{base_code}_{suffix}"
+            suffix += 1
+        return code
+
+    @staticmethod
+    async def news_code_exists(session: AsyncSession, code: str) -> bool:
+        """Return True if a news element (iblock 1) already uses *code*."""
+        result = await session.execute(
+            text("""
+                SELECT 1 FROM b_iblock_element
+                WHERE iblock_id = :iblock_id AND code = :code
+                LIMIT 1
+            """),
+            {"iblock_id": const.NEWS_IBLOCK_ID, "code": code},
+        )
+        return result.fetchone() is not None
+
+    @staticmethod
+    async def insert_news_element(
+        session: AsyncSession,
+        title: str,
+        code: str,
+        preview_text: str,
+        detail_text: str,
+        preview_picture_id: int | None,
+        tags: str,
+        active_from: datetime,
+        sort: int,
+    ) -> int:
+        """Insert a new news element in iblock 1."""
+        active_from_str = active_from.strftime(const.DATETIME_FORMAT)
+        await session.execute(
+            text("""
+                INSERT INTO b_iblock_element (
+                    timestamp_x, modified_by, date_create, created_by,
+                    iblock_id, iblock_section_id, active, active_from, active_to,
+                    sort, name, code, preview_picture, preview_text, preview_text_type,
+                    detail_picture, detail_text, detail_text_type,
+                    searchable_content, tags, tmp_id
+                ) VALUES (
+                    NOW(), :user, NOW(), :user,
+                    :iblock_id, NULL, 'Y', :active_from, NULL,
+                    :sort, :name, :code, :preview_picture, :preview_text, 'html',
+                    NULL, :detail_text, 'html',
+                    :searchable_content, :tags, 0
+                )
+            """),
+            {
+                "user": const.DEFAULT_USER_ID,
+                "iblock_id": const.NEWS_IBLOCK_ID,
+                "active_from": active_from_str,
+                "sort": sort,
+                "name": title,
+                "code": code,
+                "preview_picture": preview_picture_id,
+                "preview_text": preview_text,
+                "detail_text": detail_text,
+                "searchable_content": title.upper(),
+                "tags": tags,
+            },
+        )
+        element_id = await DatabaseClient._get_last_insert_id(session)
+        await session.execute(
+            text("UPDATE b_iblock_element SET xml_id = :id WHERE id = :id"),
+            {"id": element_id},
+        )
+        return element_id
+
+    @staticmethod
+    async def insert_new_files_batch(
+        session: AsyncSession,
+        files: list[tuple[str, str, str, int, int, int]],
+    ) -> list[int]:
+        """Insert several b_file rows in one round trip.
+
+        Args:
+            session: The active database session.
+            files: (subdir, filename, content_type, width, height, file_size) tuples.
+
+        Returns:
+            The new file IDs, in the same order as *files*. Relies on the multi-row
+            INSERT producing a contiguous auto_increment run, which holds for a single
+            statement with no concurrent writers to b_file in between.
+        """
+        if not files:
+            return []
+
+        rows_sql = ", ".join(
+            f"(NOW(), 'iblock', :height{i}, :width{i}, :file_size{i}, :content_type{i},"
+            f" :subdir{i}, :file_name{i}, :file_name{i}, NULL, NULL, NULL)"
+            for i in range(len(files))
+        )
+        params: dict[str, object] = {}
+        for i, (subdir, filename, content_type, width, height, file_size) in enumerate(files):
+            params[f"height{i}"] = height
+            params[f"width{i}"] = width
+            params[f"file_size{i}"] = file_size
+            params[f"content_type{i}"] = content_type
+            params[f"subdir{i}"] = subdir
+            params[f"file_name{i}"] = filename
+
+        await session.execute(
+            text(f"""
+                INSERT INTO b_file (
+                    timestamp_x, module_id, height, width, file_size, content_type,
+                    subdir, file_name, original_name, description, handler_id, external_id
+                )
+                VALUES {rows_sql}
+            """),
+            params,
+        )
+        first_id = await DatabaseClient._get_last_insert_id(session)
+        return list(range(first_id, first_id + len(files)))
+
+    @staticmethod
+    async def insert_news_gallery_images(
+        session: AsyncSession,
+        element_id: int,
+        file_ids: list[int],
+    ) -> None:
+        """Add file IDs to a news element's "Галерея" (MORE_PHOTO) gallery property."""
+        if not file_ids:
+            return
+
+        rows_sql = ", ".join(
+            f"(:prop_id, :element_id, :file_id{i}, 'text', :file_num{i})"
+            for i in range(len(file_ids))
+        )
+        params: dict[str, object] = {
+            "prop_id": const.NEWS_GALLERY_PROPERTY_ID,
+            "element_id": element_id,
+        }
+        for i, file_id in enumerate(file_ids):
+            params[f"file_id{i}"] = str(file_id)
+            params[f"file_num{i}"] = float(file_id)
+
+        await session.execute(
+            text(f"""
+                INSERT INTO b_iblock_element_property
+                    (iblock_property_id, iblock_element_id, value, value_type, value_num)
+                VALUES {rows_sql}
+            """),
+            params,
         )
 
     @staticmethod
@@ -1248,10 +1495,7 @@ class DatabaseClient:
 
         # 2. Back-fill description on the name row (matches working exhibition format).
         await session.execute(
-            text(
-                "UPDATE b_iblock_element_property"
-                " SET description = :descr WHERE id = :id"
-            ),
+            text("UPDATE b_iblock_element_property" " SET description = :descr WHERE id = :id"),
             {"descr": scp_description, "id": name_row},
         )
 
@@ -1364,10 +1608,7 @@ def _build_scp_link_value(
         return f"a:{len(row_ids)}:{{{entries}}}"
 
     def _img_row_dict(row_ids: list[int], file_ids: list[int]) -> str:
-        entries = "".join(
-            f'i:{r};s:{len(str(fid))}:"{fid}";'
-            for r, fid in zip(row_ids, file_ids)
-        )
+        entries = "".join(f'i:{r};s:{len(str(fid))}:"{fid}";' for r, fid in zip(row_ids, file_ids))
         return f"a:{len(row_ids)}:{{{entries}}}"
 
     props = (

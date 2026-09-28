@@ -47,6 +47,31 @@ class SSHFileManager:
 
         LOGGER.info("Finished copying file")
 
+    async def download_file(self, file: File) -> bytes:
+        """Download a file's raw bytes via SFTP.
+
+        Args:
+            file: The file to download.
+
+        Returns:
+            The file's raw contents.
+        """
+        remote_path = f"{self._config.base_path}/{file.subdir}/{file.file_name}"
+
+        LOGGER.info("Downloading file from %s ...", remote_path)
+
+        async with asyncssh.connect(
+            self._config.host,
+            username=self._config.username,
+            client_keys=[self._config.key_path],
+        ) as conn:
+            async with conn.start_sftp_client() as sftp:
+                async with sftp.open(remote_path, "rb") as remote_file:
+                    data = await remote_file.read()
+
+        LOGGER.info("Finished downloading file from %s", remote_path)
+        return data
+
     async def upload_file(self, data: bytes, subdir: str, filename: str) -> None:
         """Upload raw bytes as a new file to the remote server via SFTP.
 

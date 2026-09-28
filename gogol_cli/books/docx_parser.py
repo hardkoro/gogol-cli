@@ -11,7 +11,9 @@ import typer
 
 from gogol_cli.books.schemas import ParsedBookEntry
 from gogol_cli.exhibition.docx_parser import (
+    _append_isbn_to_bib,
     _collapse_spaces,
+    _extract_isbn,
     _first_sentence,
     _paragraphs_to_html,
 )
@@ -44,11 +46,23 @@ def _is_numbered_bib(text: str) -> bool:
     return bool(re.match(r"^\d+\.\s+\S", text))
 
 
+_AUTHOR_ONLY_RE = re.compile(
+    r"^[\w\-]+,\s+[\w\-]+(?:\s+[\w\-]+){0,"
+    rf"{_MAX_AUTHOR_WORDS - 2}"
+    r"}\s*(?:\(\d{4}-?\d{0,4}\))?\.?$"
+)
+
+
 def _is_author_only_line(text: str) -> bool:
-    """Detect a standalone author line: 'Lastname, Firstname [Patronymic] [(dates)].'"""
+    """Detect a standalone author line: 'Lastname, Firstname [Patronymic] [(dates)].'
+
+    Anchored to the *whole* paragraph (not just its start) so that description
+    sentences which happen to contain an early comma (e.g. "Данное издание
+    снабжено ... художников, как ...") aren't mistaken for an author line.
+    """
     if ". -" in text or " / " in text or " : " in text:
         return False
-    return bool(re.match(r"^\w[\w\s\-]*,\s+\w", text))
+    return bool(_AUTHOR_ONLY_RE.match(text.strip()))
 
 
 def _is_bib_line(text: str) -> bool:
@@ -260,12 +274,16 @@ def parse_books_file(path: str) -> list[ParsedBookEntry]:
 
     entries: list[ParsedBookEntry] = []
     for i, (author, bib_line, desc_paras) in enumerate(raw_books, start=1):
+        isbn_lines, desc_paras_no_isbn = _extract_isbn(desc_paras)
         if author is not None:
             bib = _parse_bib_fields(bib_line, author=author)
         else:
             bib = _parse_numbered_bib(bib_line)
-        description = _paragraphs_to_html(desc_paras)
-        preview_text = f"<p>{_first_sentence(desc_paras[0])}</p>" if desc_paras else ""
+        bib = _append_isbn_to_bib(bib, isbn_lines)
+        description = _paragraphs_to_html(desc_paras_no_isbn)
+        preview_text = (
+            f"<p>{_first_sentence(desc_paras_no_isbn[0])}</p>" if desc_paras_no_isbn else ""
+        )
         entry = ParsedBookEntry(
             bib=bib,
             description=description,

@@ -10,6 +10,11 @@ DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 DEFAULT_USER_ID = 1
 
+# --- Local image conversion -------------------------------------------------------
+
+LOCAL_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".tiff", ".tif")
+LOCAL_IMAGE_MAX_DIM = 780
+
 # --- Pin iblock ------------------------------------------------------------------
 
 PIN_IBLOCK_ID = 38
@@ -20,6 +25,11 @@ PIN_DEFAULT_SORT = 50
 PIN_LINK_PROPERTY_ID = 150
 PIN_BUTTON_TEXT_PROPERTY_ID = 149
 PIN_NAME_PROPERTY_ID = 148
+
+# Slider on /events/ crops pictures to this ratio via Bitrix resize_cache; pins skip
+# that step, so we crop to it ourselves when copying an event's picture to a pin.
+PIN_IMAGE_WIDTH = 848
+PIN_IMAGE_HEIGHT = 372
 
 # --- Event iblock ----------------------------------------------------------------
 
@@ -121,6 +131,18 @@ VIRTUAL_EXHIBITION_PROP_CATEGORY_VALUE = 120  # value_enum for prop 213
 
 # Image resizing
 VIRTUAL_EXHIBITION_MAX_IMAGE_DIM = 1280
+
+# --- News iblock -----------------------------------------------------------------
+
+NEWS_IBLOCK_ID = 1
+NEWS_DEFAULT_SORT = 500
+
+NEWS_GALLERY_PROPERTY_ID = 10  # "Галерея" (MORE_PHOTO), multiple file property
+
+NEWS_MAX_IMAGE_DIM = 780
+
+NEWS_TAG_DEFAULT = "Дом Гоголя"
+NEWS_TAG_PARTNERS = "Партнеры"
 
 # --- Calendar --------------------------------------------------------------------
 

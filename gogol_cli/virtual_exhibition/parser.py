@@ -61,7 +61,7 @@ def _is_garbage(text: str) -> bool:
 
 
 _BIB_ORIGIN_RE = re.compile(
-    r"^(СССР|Россия|РСФСР|Франция|Германия|Англия|[А-ЯЁ][а-яё]{2,})\b.*\b\d{4}\b",
+    r"^(СССР|Россия|РСФСР|Франция|Германия|Англия|[А-ЯЁ][а-яё]{2,})\b.*\b\d{4}\s*\.?\s*$",
     re.IGNORECASE,
 )
 _BIB_MATERIAL_KEYWORDS = (
@@ -103,7 +103,7 @@ def _is_bib_material(text: str) -> bool:
     Real bib material lines are short (e.g. "Бумага, ксилография. 29,9х22,1 см.").
     Long description sentences that mention the same keywords are excluded.
     """
-    if len(text.strip()) >= _MAX_BIB_MATERIAL_LEN:
+    if len(text.strip()) > _MAX_BIB_MATERIAL_LEN:
         return False
     low = text.lower()
     return any(kw in low for kw in _BIB_MATERIAL_KEYWORDS)
@@ -130,7 +130,7 @@ def _extract_kp_image_key(filename: str) -> str | None:
     if m is None:
         return None
     base = m.group(1)
-    after = filename[m.end():]
+    after = filename[m.end() :]
     digit_m = re.match(r"\s+(\d+)", after)
     return f"{base}/{digit_m.group(1)}" if digit_m else base
 

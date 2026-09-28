@@ -17,6 +17,7 @@ from gogol_cli.clients import DatabaseClient
 from gogol_cli.exceptions import GogolCLIException, SSHNotConfiguredError
 from gogol_cli.books.schemas import ParsedBookEntry
 from gogol_cli.exhibition.schemas import ParsedExhibition
+from gogol_cli.news.schemas import ParsedNews
 from gogol_cli.schemas import Event
 from gogol_cli.ssh_file_manager import SSHFileManager
 from gogol_cli.virtual_exhibition.schemas import ParsedVirtualExhibition
@@ -25,7 +26,7 @@ LOGGER = logging.getLogger(__name__)
 
 # MySQL error codes for dropped/lost connections (safe to retry: nothing was committed).
 _RETRYABLE_MYSQL_ERROR_CODES = {2002, 2003, 2006, 2013}
-_MAX_DB_RETRIES = 3
+_MAX_DB_RETRIES = 5
 _DB_RETRY_DELAY_SECONDS = 3.0
 
 _P = ParamSpec("_P")
@@ -246,6 +247,41 @@ class GogolCLIService:
 
         return await self._db.insert_file_copy(session, picture_id, new_subdir)
 
+    async def _copy_picture_cropped(
+        self, session: AsyncSession, picture_id: int | None, width: int, height: int
+    ) -> int:
+        """Copy a picture, cropping it to fill width x height, as a new b_file record.
+
+        Args:
+            session: The active database session.
+            picture_id: The ID of the source file record to copy.
+            width: Target width to crop/scale to.
+            height: Target height to crop/scale to.
+
+        Returns:
+            The ID of the newly inserted file record.
+        """
+        if picture_id is None:
+            raise ValueError("Cannot copy picture: picture_id is None")
+
+        old_file = await self._db.get_file_by_id(session, picture_id)
+        new_subdir = self._db.generate_new_subdir()
+
+        file_size = old_file.file_size
+        if not self._dry_run:
+            if self._ssh is None:
+                raise SSHNotConfiguredError(
+                    "An SSH file manager is required to copy pictures but was not provided."
+                )
+            data = await self._ssh.download_file(old_file)
+            cropped_data, width, height = _crop_to_fill(data, width, height)
+            file_size = len(cropped_data)
+            await self._ssh.upload_file(cropped_data, new_subdir, old_file.file_name)
+
+        return await self._db.insert_new_file_with_subdir(
+            session, new_subdir, old_file.file_name, file_size, height=height, width=width
+        )
+
     async def _index_search_content(
         self,
         event_id: int,
@@ -269,8 +305,14 @@ class GogolCLIService:
             try:
                 async with self._db.session() as session:
                     await self._db.insert_search_content(
-                        session, event_id, title, preview_text, detail_text, tags,
-                        active_from, active_to,
+                        session,
+                        event_id,
+                        title,
+                        preview_text,
+                        detail_text,
+                        tags,
+                        active_from,
+                        active_to,
                     )
                     await session.commit()
                 return
@@ -280,13 +322,19 @@ class GogolCLIService:
                         "Could not index event %d for the calendar search filter "
                         "(attempt %d/%d); the event was created but may not appear "
                         "in the calendar until reindexed: %s",
-                        event_id, attempt, _MAX_DB_RETRIES, exc,
+                        event_id,
+                        attempt,
+                        _MAX_DB_RETRIES,
+                        exc,
                     )
                     return
                 LOGGER.warning(
                     "Search indexing for event %d lost its DB connection "
                     "(attempt %d/%d), retrying in %.0fs ...",
-                    event_id, attempt, _MAX_DB_RETRIES, _DB_RETRY_DELAY_SECONDS,
+                    event_id,
+                    attempt,
+                    _MAX_DB_RETRIES,
+                    _DB_RETRY_DELAY_SECONDS,
                 )
                 await asyncio.sleep(_DB_RETRY_DELAY_SECONDS)
 
@@ -300,7 +348,12 @@ class GogolCLIService:
         LOGGER.info("Pinning event %s ...", event.id)
 
         async with self._db.session() as session:
-            preview_picture_id = await self._copy_picture(session, event.preview_picture)
+            preview_picture_id = await self._copy_picture_cropped(
+                session,
+                event.preview_picture,
+                const.PIN_IMAGE_WIDTH,
+                const.PIN_IMAGE_HEIGHT,
+            )
             pin_id = await self._db.insert_pin(session, event, preview_picture_id)
             await self._db.set_pin_properties(session, event, pin_id)
 
@@ -558,11 +611,19 @@ class GogolCLIService:
             type_of_activity_id, purchase_link, registration_link.
         """
         combined = f"{name} {description_html}".lower()
-        is_registration = bool(registration_link.strip())
         is_free = not price or price.strip() in {"", "0"} or "бесплат" in combined
 
+        # A registration link is the strongest signal, but events are sometimes
+        # announced without one yet while the description already says so.
+        has_entry_by_registration = "вход по регистрации" in combined
+        has_by_registration = "по регистрации" in combined
+        is_registration = bool(registration_link.strip()) or has_by_registration
+
         if is_registration and is_free:
-            description_buy_ticket = "Мероприятие бесплатное. Вход по регистрации"
+            if has_entry_by_registration:
+                description_buy_ticket = "Мероприятие бесплатное. Вход по регистрации"
+            else:
+                description_buy_ticket = "Мероприятие бесплатное. По регистрации."
         elif is_free:
             description_buy_ticket = "Мероприятие бесплатное. Вход свободный"
         else:
@@ -659,7 +720,20 @@ class GogolCLIService:
             old_id = await self._db.get_chronograph_section_by_name(session, old_section_name)
             new_id = await self._db.get_chronograph_section_by_name(session, new_section_name)
 
-            await self._db.copy_chronograph_section(session, old_id, new_id)
+            async def copy_picture_or_keep(session: AsyncSession, picture_id: int) -> int:
+                try:
+                    return await self._copy_picture(session, picture_id)
+                except FileNotFoundError:
+                    LOGGER.warning(
+                        "Chronograph picture file %d is missing; keeping the stale reference",
+                        picture_id,
+                    )
+                    return picture_id
+
+            active_from, active_to = self._get_start_and_end_dates(month_number, year_suffix)
+            await self._db.copy_chronograph_section(
+                session, old_id, new_id, active_from, active_to, copy_picture_or_keep
+            )
 
             if not self._dry_run:
                 await session.commit()
@@ -841,6 +915,105 @@ class GogolCLIService:
         LOGGER.info("Finished adding %d books to «%s»", len(books), label)
 
     @_with_db_retry
+    async def add_news(
+        self,
+        parsed: ParsedNews,
+        preview_image: tuple[bytes, str],
+        gallery_images: list[tuple[bytes, str]],
+        tags: str,
+        active_from: datetime,
+    ) -> int:
+        """Add a news element with a preview picture and an optional image gallery.
+
+        Args:
+            parsed: The parsed (and interactively confirmed) news title/text.
+            preview_image: (bytes, filename) for the element's preview/detail picture.
+            gallery_images: Additional (bytes, filename) pairs for the "Галерея" property.
+            tags: Tag string (e.g. "Дом Гоголя" or "Партнеры").
+            active_from: Activation timestamp for the news element.
+
+        Returns:
+            The ID of the newly created news element.
+        """
+        LOGGER.info("Adding news '%s' ...", parsed.title)
+
+        if not self._dry_run and self._ssh is None:
+            raise SSHNotConfiguredError(
+                "An SSH file manager is required to upload images but was not provided."
+            )
+        ssh = self._ssh
+
+        # Resize and upload every image *before* opening a DB session. SFTP transfer
+        # of several full-size camera photos can take a while; doing it inside an open
+        # transaction leaves the connection idle for long enough that shared-hosting
+        # MySQL servers kill it ("Lost connection ... during query"), and every retry
+        # then replays the same slow uploads and hits the same wall again.
+        preview_data, preview_filename = preview_image
+        resized_preview, preview_w, preview_h = _resize_image(
+            preview_data, const.NEWS_MAX_IMAGE_DIM
+        )
+        preview_subdir = self._db.generate_new_subdir()
+        if not self._dry_run:
+            assert ssh is not None
+            await ssh.upload_file(resized_preview, preview_subdir, preview_filename)
+
+        uploaded_gallery: list[tuple[str, str, str, int, int, int]] = []
+        for img_data, img_filename in gallery_images:
+            img_resized, img_w, img_h = _resize_image(img_data, const.NEWS_MAX_IMAGE_DIM)
+            img_subdir = self._db.generate_new_subdir()
+            if not self._dry_run:
+                assert ssh is not None
+                await ssh.upload_file(img_resized, img_subdir, img_filename)
+            uploaded_gallery.append(
+                (
+                    img_subdir,
+                    img_filename,
+                    _content_type(img_filename),
+                    img_w,
+                    img_h,
+                    len(img_resized),
+                )
+            )
+
+        # Everything below is now a short burst of fast metadata-only DB statements.
+        async with self._db.session() as session:
+            preview_file_id = await self._db.insert_new_file(
+                session,
+                preview_subdir,
+                preview_filename,
+                _content_type(preview_filename),
+                preview_w,
+                preview_h,
+                len(resized_preview),
+            )
+
+            code = await self._db.generate_unique_news_code(session, parsed.title)
+            news_id = await self._db.insert_news_element(
+                session,
+                title=parsed.title,
+                code=code,
+                preview_text=parsed.preview_text,
+                detail_text=parsed.detail_text,
+                preview_picture_id=preview_file_id,
+                tags=tags,
+                active_from=active_from,
+                sort=const.NEWS_DEFAULT_SORT,
+            )
+
+            # Batched into a couple of multi-row INSERTs rather than one round trip per
+            # image: this host has been dropping connections that fire too many separate
+            # queries in quick succession.
+            gallery_file_ids = await self._db.insert_new_files_batch(session, uploaded_gallery)
+            if gallery_file_ids:
+                await self._db.insert_news_gallery_images(session, news_id, gallery_file_ids)
+
+            if not self._dry_run:
+                await session.commit()
+
+        LOGGER.info("Finished adding news '%s' (id=%d)", parsed.title, news_id)
+        return news_id
+
+    @_with_db_retry
     async def create_virtual_exhibition(
         self,
         parsed: ParsedVirtualExhibition,
@@ -957,6 +1130,31 @@ def _php_serialize_html(text: str) -> str:
     """Serialise an HTML string to the PHP ``a:2:{...}`` format stored in item props."""
     byte_len = len(text.encode("utf-8"))
     return f'a:2:{{s:4:"TEXT";s:{byte_len}:"{text}";s:4:"TYPE";s:4:"HTML";}}'
+
+
+def _crop_to_fill(data: bytes, target_w: int, target_h: int) -> tuple[bytes, int, int]:
+    """Scale and center-crop *data* to exactly fill target_w x target_h.
+
+    Mirrors the site's own resize_cache crop mode so pinned pictures render
+    the same way as the ones the events template resizes on its own.
+
+    Returns:
+        (cropped_bytes, target_w, target_h)
+    """
+    with Image.open(io.BytesIO(data)) as img:
+        orig_format = img.format or "JPEG"
+        w, h = img.width, img.height
+        scale = max(target_w / w, target_h / h)
+        scaled_w, scaled_h = max(1, round(w * scale)), max(1, round(h * scale))
+        scaled = img.resize((scaled_w, scaled_h), Image.Resampling.LANCZOS)
+
+        left = (scaled_w - target_w) // 2
+        top = (scaled_h - target_h) // 2
+        cropped = scaled.crop((left, top, left + target_w, top + target_h))
+
+        buf = io.BytesIO()
+        cropped.save(buf, format=orig_format, quality=90)
+        return buf.getvalue(), target_w, target_h
 
 
 def _resize_image(data: bytes, max_dim: int) -> tuple[bytes, int, int]:

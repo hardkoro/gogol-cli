@@ -15,11 +15,13 @@ from gogol_cli.exporters.smtp import EmailConfig, SMTPConfig
 from gogol_cli.runner import copy_chronograph as run_chronograph
 from gogol_cli.runner import copy_event as run_copy_event
 from gogol_cli.runner import add_books as run_add_books
+from gogol_cli.runner import add_news as run_add_news
 from gogol_cli.runner import create_exhibition as run_create_exhibition
 from gogol_cli.runner import create_virtual_exhibition as run_create_virtual_exhibition
 from gogol_cli.runner import add_events as run_add_events
 from gogol_cli.runner import export_statistics as run_export
 from gogol_cli.runner import pin_event as run_pin_event
+from gogol_cli.runner import resize_images as run_resize_images
 from gogol_cli.runner import xcopy_events as run_xcopy_events
 from gogol_cli.service import parse_xcopy_text
 from gogol_cli.ssh_file_manager import SSHConfig
@@ -138,6 +140,10 @@ def export(
 @app.command()
 def chrono(
     database_uri: Annotated[str, typer.Option(help="Database URI", envvar="DATABASE_URI")],
+    ssh_host: Annotated[str, typer.Option(help="SSH host", envvar="SSH_HOST")],
+    ssh_username: Annotated[str, typer.Option(help="SSH username", envvar="SSH_USERNAME")],
+    ssh_key_path: Annotated[str, typer.Option(help="SSH key path", envvar="SSH_KEY_PATH")],
+    ssh_base_path: Annotated[str, typer.Option(help="SSH base path", envvar="SSH_BASE_PATH")],
     month_number: Annotated[int, typer.Argument(help="Month number (1-12)")],
     year_suffix: Annotated[
         str, typer.Argument(help="Two last letters of the year (24, 25, and so on)")
@@ -146,7 +152,13 @@ def chrono(
 ) -> None:
     """Run the chronograph."""
     uvloop.install()
-    asyncio.run(run_chronograph(database_uri, month_number, year_suffix, dry_run))
+    ssh_config = SSHConfig(
+        host=ssh_host,
+        username=ssh_username,
+        key_path=ssh_key_path,
+        base_path=ssh_base_path,
+    )
+    asyncio.run(run_chronograph(database_uri, month_number, year_suffix, dry_run, ssh_config))
 
 
 @app.command()
@@ -297,6 +309,46 @@ def books(
         base_path=ssh_base_path,
     )
     asyncio.run(run_add_books(database_uri, folder, section_id, dry_run, ssh_config))
+
+
+@app.command()
+def news(
+    database_uri: Annotated[str, typer.Option(help="Database URI", envvar="DATABASE_URI")],
+    ssh_host: Annotated[str, typer.Option(help="SSH host", envvar="SSH_HOST")],
+    ssh_username: Annotated[str, typer.Option(help="SSH username", envvar="SSH_USERNAME")],
+    ssh_key_path: Annotated[str, typer.Option(help="SSH key path", envvar="SSH_KEY_PATH")],
+    ssh_base_path: Annotated[str, typer.Option(help="SSH base path", envvar="SSH_BASE_PATH")],
+    folder: Annotated[
+        str,
+        typer.Argument(help="Folder containing a .docx file and news images"),
+    ],
+    partners: Annotated[
+        bool,
+        typer.Option(
+            "--partners",
+            help='Tag as "Партнеры" instead of "Дом Гоголя"',
+        ),
+    ] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
+) -> None:
+    """Add a news entry from a folder containing a .docx file and images."""
+    uvloop.install()
+    ssh_config = SSHConfig(
+        host=ssh_host,
+        username=ssh_username,
+        key_path=ssh_key_path,
+        base_path=ssh_base_path,
+    )
+    asyncio.run(run_add_news(database_uri, folder, dry_run, ssh_config, partners))
+
+
+@app.command()
+def resize_images(
+    folder: Annotated[str, typer.Argument(help="Path to the folder with images")],
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
+) -> None:
+    """Convert images in a folder to JPG, resizing the largest side to 780px."""
+    run_resize_images(folder, dry_run)
 
 
 @app.command()
