@@ -111,8 +111,23 @@ _RUSSIAN_MONTHS: dict[str, int] = {
 def _parse_date_time_line(ln: str, month_pattern: str, today: date) -> list[tuple[date, str]]:
     """Parse a single date/time line into (date, time_str) pairs.
 
-    Returns an empty list if the line is not a valid date/time line.
+    A line may hold several date groups (``22 ноября в 14 и 16 часов, 29 ноября
+    в 14 часов``); each is parsed on its own. Returns an empty list if the line
+    is not a valid date/time line.
     """
+    group_head = re.compile(rf"\d{{1,2}}(?:\s*(?:,|и)\s*\d{{1,2}})*\s+(?:{month_pattern})\s+в\s+")
+    starts = [m.start() for m in group_head.finditer(ln)]
+    if len(starts) > 1:
+        bounds = [0, *starts[1:], len(ln)]
+        result: list[tuple[date, str]] = []
+        for begin, end in zip(bounds, bounds[1:]):
+            result.extend(_parse_date_time_group(ln[begin:end], month_pattern, today))
+        return result
+    return _parse_date_time_group(ln, month_pattern, today)
+
+
+def _parse_date_time_group(ln: str, month_pattern: str, today: date) -> list[tuple[date, str]]:
+    """Parse a single ``<days> <month> в <times>`` group into (date, time_str) pairs."""
     month_match = re.search(month_pattern, ln)
     if month_match is None:
         return []
