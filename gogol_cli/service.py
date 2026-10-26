@@ -6,7 +6,7 @@ import io
 import logging
 import re
 from datetime import date, datetime, timedelta
-from typing import Awaitable, Callable, ParamSpec, TypedDict, TypeVar
+from typing import Awaitable, Callable, NamedTuple, ParamSpec, TypedDict, TypeVar
 
 from PIL import Image
 from sqlalchemy.exc import DBAPIError
@@ -65,6 +65,16 @@ def _with_db_retry(func: Callable[_P, Awaitable[_T]]) -> Callable[_P, Awaitable[
         raise AssertionError("unreachable")
 
     return wrapper
+
+
+class _StagedCroppedPicture(NamedTuple):
+    """A cropped picture already uploaded via SSH, awaiting its b_file record."""
+
+    subdir: str
+    file_name: str
+    file_size: int
+    width: int
+    height: int
 
 
 class EventData(TypedDict):
@@ -282,6 +292,56 @@ class GogolCLIService:
             session, new_subdir, old_file.file_name, file_size, height=height, width=width
         )
 
+    async def _stage_picture_copy(self, picture_id: int | None) -> tuple[int, str]:
+        """Copy a picture's physical file via SSH, without holding a DB connection open.
+
+        The file metadata is read in its own short-lived session, which is closed
+        before the slow SSH round trips so the MySQL connection can't go idle (and be
+        dropped by the server) in the middle of a larger transaction.
+
+        Returns:
+            The source file ID and the new subdirectory the file was copied to.
+        """
+        if picture_id is None:
+            raise ValueError("Cannot copy picture: picture_id is None")
+
+        async with self._db.session() as session:
+            old_file = await self._db.get_file_by_id(session, picture_id)
+        new_subdir = self._db.generate_new_subdir()
+
+        if not self._dry_run:
+            if self._ssh is None:
+                raise SSHNotConfiguredError(
+                    "An SSH file manager is required to copy pictures but was not provided."
+                )
+            await self._ssh.copy_file(old_file, new_subdir)
+
+        return picture_id, new_subdir
+
+    async def _stage_picture_copy_cropped(
+        self, picture_id: int | None, width: int, height: int
+    ) -> _StagedCroppedPicture:
+        """Like _stage_picture_copy, but crops to fill width x height before uploading."""
+        if picture_id is None:
+            raise ValueError("Cannot copy picture: picture_id is None")
+
+        async with self._db.session() as session:
+            old_file = await self._db.get_file_by_id(session, picture_id)
+        new_subdir = self._db.generate_new_subdir()
+
+        file_size = old_file.file_size
+        if not self._dry_run:
+            if self._ssh is None:
+                raise SSHNotConfiguredError(
+                    "An SSH file manager is required to copy pictures but was not provided."
+                )
+            data = await self._ssh.download_file(old_file)
+            cropped_data, width, height = _crop_to_fill(data, width, height)
+            file_size = len(cropped_data)
+            await self._ssh.upload_file(cropped_data, new_subdir, old_file.file_name)
+
+        return _StagedCroppedPicture(new_subdir, old_file.file_name, file_size, width, height)
+
     async def _index_search_content(
         self,
         event_id: int,
@@ -291,8 +351,13 @@ class GogolCLIService:
         tags: str | None,
         active_from: str,
         active_to: str,
+        copy_from: int | None = None,
     ) -> None:
         """Best-effort: index the event so the calendar's search filter picks it up.
+
+        If *copy_from* is given, the source event's index row is copied server-side
+        (keeping the body text off the wire); the row is built from the given texts
+        only when the source was never indexed.
 
         The event element itself is already committed by the time this runs. The
         b_search_content INSERT has been observed to reliably drop the remote MySQL
@@ -304,6 +369,11 @@ class GogolCLIService:
         for attempt in range(1, _MAX_DB_RETRIES + 1):
             try:
                 async with self._db.session() as session:
+                    if copy_from is not None and await self._db.copy_search_content(
+                        session, copy_from, event_id, active_from, active_to
+                    ):
+                        await session.commit()
+                        return
                     await self._db.insert_search_content(
                         session,
                         event_id,
@@ -338,7 +408,6 @@ class GogolCLIService:
                 )
                 await asyncio.sleep(_DB_RETRY_DELAY_SECONDS)
 
-    @_with_db_retry
     async def pin_event(self, event: Event) -> None:
         """Create a pin element for the given event, copying its preview picture.
 
@@ -347,12 +416,24 @@ class GogolCLIService:
         """
         LOGGER.info("Pinning event %s ...", event.id)
 
+        # Slow SSH work first, outside any DB transaction; then a quick write burst.
+        staged = await self._stage_picture_copy_cropped(
+            event.preview_picture, const.PIN_IMAGE_WIDTH, const.PIN_IMAGE_HEIGHT
+        )
+        await self._write_pin(event, staged)
+
+        LOGGER.info("Finished pinning event %s", event.id)
+
+    @_with_db_retry
+    async def _write_pin(self, event: Event, staged: _StagedCroppedPicture) -> None:
         async with self._db.session() as session:
-            preview_picture_id = await self._copy_picture_cropped(
+            preview_picture_id = await self._db.insert_new_file_with_subdir(
                 session,
-                event.preview_picture,
-                const.PIN_IMAGE_WIDTH,
-                const.PIN_IMAGE_HEIGHT,
+                staged.subdir,
+                staged.file_name,
+                staged.file_size,
+                height=staged.height,
+                width=staged.width,
             )
             pin_id = await self._db.insert_pin(session, event, preview_picture_id)
             await self._db.set_pin_properties(session, event, pin_id)
@@ -360,16 +441,13 @@ class GogolCLIService:
             if not self._dry_run:
                 await session.commit()
 
-        LOGGER.info("Finished pinning event %s", event.id)
-
-    @_with_db_retry
     async def copy_event(
         self,
         event: Event,
         new_event_date_str: str,
         new_event_time_str: str,
         new_price: str | None,
-    ) -> None:
+    ) -> str:
         """Copy an event to a new date, duplicating its pictures and properties.
 
         Args:
@@ -377,6 +455,10 @@ class GogolCLIService:
             new_event_date_str: The date for the new event in YYYY-MM-DD format.
             new_event_time_str: The time for the new event in HH-MM format.
             new_price: The ticket price for the new event, or None to keep the original.
+
+        Returns:
+            The URL of the new event (in a dry run, the row is rolled back, so the URL
+            doesn't resolve).
         """
         time_display = new_event_time_str.replace("-", ":")
         LOGGER.info(
@@ -388,9 +470,55 @@ class GogolCLIService:
 
         new_event_date = datetime.strptime(new_event_date_str, const.DATE_FORMAT)
 
+        # Slow SSH work first, outside any DB transaction; then a quick write burst
+        # so the MySQL connection never sits idle mid-transaction.
+        preview_id, preview_subdir = await self._stage_picture_copy(event.preview_picture)
+        detail_id, detail_subdir = await self._stage_picture_copy(event.detail_picture)
+
+        new_event_id, active_from, active_to = await self._write_event_copy(
+            event,
+            (preview_id, preview_subdir),
+            (detail_id, detail_subdir),
+            new_event_date,
+            new_event_time_str,
+            new_price,
+        )
+
+        if not self._dry_run:
+            await self._index_search_content(
+                new_event_id,
+                event.name,
+                event.preview_text,
+                event.detail_text,
+                event.tags,
+                active_from,
+                active_to,
+                copy_from=event.id,
+            )
+
+        new_event_url = f"https://www.domgogolya.ru/recital/{new_event_id}/"
+        LOGGER.info(
+            "Finished copying event %s to %s at %s — %s",
+            event.id,
+            new_event_date_str,
+            time_display,
+            new_event_url,
+        )
+        return new_event_url
+
+    @_with_db_retry
+    async def _write_event_copy(
+        self,
+        event: Event,
+        preview: tuple[int, str],
+        detail: tuple[int, str],
+        new_event_date: datetime,
+        new_event_time_str: str,
+        new_price: str | None,
+    ) -> tuple[int, str, str]:
         async with self._db.session() as session:
-            preview_picture_id = await self._copy_picture(session, event.preview_picture)
-            detail_picture_id = await self._copy_picture(session, event.detail_picture)
+            preview_picture_id = await self._db.insert_file_copy(session, *preview)
+            detail_picture_id = await self._db.insert_file_copy(session, *detail)
 
             new_event_id, active_from, active_to = await self._db.insert_event_copy(
                 session,
@@ -415,24 +543,7 @@ class GogolCLIService:
             if not self._dry_run:
                 await session.commit()
 
-        if not self._dry_run:
-            await self._index_search_content(
-                new_event_id,
-                event.name,
-                event.preview_text,
-                event.detail_text,
-                event.tags,
-                active_from,
-                active_to,
-            )
-
-        time_display = new_event_time_str.replace("-", ":")
-        LOGGER.info(
-            "Finished copying event %s to %s at %s",
-            event.id,
-            new_event_date_str,
-            time_display,
-        )
+        return new_event_id, active_from, active_to
 
     @_with_db_retry
     async def add_event(

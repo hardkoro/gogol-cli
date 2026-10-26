@@ -54,7 +54,10 @@ async def copy_event(
     cli_service = GogolCLIService(database_client, ssh_file_manager, dry_run)
 
     old_event = await cli_service.get_event(event_url)
-    await cli_service.copy_event(old_event, new_event_date_str, new_event_time_str, new_price)
+    new_url = await cli_service.copy_event(
+        old_event, new_event_date_str, new_event_time_str, new_price
+    )
+    typer.echo(new_url)
 
 
 async def xcopy_events(
@@ -71,7 +74,10 @@ async def xcopy_events(
     for url, date_times in instructions:
         old_event = await cli_service.get_event(url)
         for d, time_str in date_times:
-            await cli_service.copy_event(old_event, d.strftime("%Y-%m-%d"), time_str, None)
+            new_url = await cli_service.copy_event(
+                old_event, d.strftime("%Y-%m-%d"), time_str, None
+            )
+            typer.echo(f"{d:%d.%m} {time_str.replace('-', ':')} — {new_url}")
 
 
 async def export_statistics(

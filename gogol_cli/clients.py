@@ -353,17 +353,8 @@ class DatabaseClient:
             new_event_date + timedelta(hours=int(hours) + 1, minutes=int(minutes))
         ).strftime(const.DATETIME_FORMAT)
 
-        searchable_content = " ".join(
-            filter(
-                None,
-                [
-                    event.name,
-                    _strip_html(event.preview_text),
-                    _strip_html(event.detail_text),
-                ],
-            )
-        ).upper()
-
+        # Copy the text columns server-side (INSERT ... SELECT) rather than resending
+        # an event's HTML body (twice: detail_text and searchable_content) from the client.
         await session.execute(
             text("""
                 INSERT INTO b_iblock_element (
@@ -373,13 +364,14 @@ class DatabaseClient:
                     detail_picture, detail_text, detail_text_type,
                     searchable_content, tags, tmp_id, code
                 )
-                VALUES (
+                SELECT
                     :now, :user, :now, :user,
                     :iblock_id, NULL, 'Y', :active_from, :active_to,
-                    :sort, :name, :preview_picture, :preview_text, :preview_text_type,
-                    :detail_picture, :detail_text, :detail_text_type,
-                    :searchable_content, :tags, 0, ''
-                )
+                    :sort, name, :preview_picture, preview_text, preview_text_type,
+                    :detail_picture, detail_text, detail_text_type,
+                    searchable_content, tags, 0, ''
+                FROM b_iblock_element
+                WHERE id = :old_id
             """),
             {
                 "now": now,
@@ -388,20 +380,70 @@ class DatabaseClient:
                 "active_from": active_from,
                 "active_to": active_to,
                 "sort": const.EVENT_DEFAULT_SORT,
-                "name": event.name,
                 "preview_picture": preview_picture_id,
-                "preview_text": event.preview_text,
-                "preview_text_type": event.preview_text_type,
                 "detail_picture": detail_picture_id,
-                "detail_text": event.detail_text,
-                "detail_text_type": event.detail_text_type,
-                "searchable_content": searchable_content,
-                "tags": event.tags,
+                "old_id": event.id,
             },
         )
         new_event_id = await DatabaseClient._get_last_insert_id(session)
 
         return new_event_id, active_from, active_to
+
+    @staticmethod
+    async def copy_search_content(
+        session: AsyncSession,
+        source_event_id: int,
+        new_event_id: int,
+        date_from: str,
+        date_to: str,
+    ) -> int:
+        """Copy an event's b_search_content row server-side for a new event.
+
+        Like ``insert_event_copy``, this keeps the (large) body text out of the
+        client->server traffic.
+
+        Returns:
+            The number of rows inserted (0 if the source event was never indexed).
+        """
+        now = datetime.now(tz=None).strftime(const.DATETIME_FORMAT)
+        url = DatabaseClient._search_content_url(new_event_id)
+        result = await session.execute(
+            text("""
+                INSERT INTO b_search_content (
+                    date_change, module_id, item_id, custom_rank,
+                    url, title, body, tags, param1, param2,
+                    date_from, date_to
+                )
+                SELECT
+                    :now, module_id, :new_id, custom_rank,
+                    :url, title, body, tags, param1, param2,
+                    :date_from, :date_to
+                FROM b_search_content
+                WHERE module_id = 'iblock' AND item_id = :old_id
+                LIMIT 1
+            """),
+            {
+                "now": now,
+                "new_id": str(new_event_id),
+                "old_id": str(source_event_id),
+                "url": url,
+                "date_from": date_from,
+                "date_to": date_to,
+            },
+        )
+        return cast(CursorResult, result).rowcount
+
+    @staticmethod
+    def _search_content_url(event_id: int) -> str:
+        return (
+            f"=ID={event_id}&EXTERNAL_ID={event_id}"
+            f"&IBLOCK_SECTION_ID={const.EVENT_IBLOCK_SECTION_ID}"
+            f"&IBLOCK_TYPE_ID={const.EVENT_IBLOCK_TYPE_ID}"
+            f"&IBLOCK_ID={const.EVENT_IBLOCK_ID}"
+            f"&IBLOCK_CODE={const.EVENT_IBLOCK_CODE}"
+            f"&IBLOCK_EXTERNAL_ID={const.EVENT_IBLOCK_EXTERNAL_ID}"
+            f"&CODE="
+        )
 
     @staticmethod
     async def insert_search_content(
@@ -427,15 +469,7 @@ class DatabaseClient:
             date_to: The event's active-to timestamp, formatted per ``const.DATETIME_FORMAT``.
         """
         now = datetime.now(tz=None).strftime(const.DATETIME_FORMAT)
-        url = (
-            f"=ID={event_id}&EXTERNAL_ID={event_id}"
-            f"&IBLOCK_SECTION_ID={const.EVENT_IBLOCK_SECTION_ID}"
-            f"&IBLOCK_TYPE_ID={const.EVENT_IBLOCK_TYPE_ID}"
-            f"&IBLOCK_ID={const.EVENT_IBLOCK_ID}"
-            f"&IBLOCK_CODE={const.EVENT_IBLOCK_CODE}"
-            f"&IBLOCK_EXTERNAL_ID={const.EVENT_IBLOCK_EXTERNAL_ID}"
-            f"&CODE="
-        )
+        url = DatabaseClient._search_content_url(event_id)
         body = " ".join(
             filter(
                 None,
