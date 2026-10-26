@@ -281,6 +281,7 @@ async def _process_single_event(
             event_data=event_data,
             image_data=matched_image_data,
             image_filename=matched_image_filename,
+            inline_images=confirmed_event.inline_images,
         )
 
     typer.echo("✓ Event created successfully")

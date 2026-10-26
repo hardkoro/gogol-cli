@@ -177,3 +177,5 @@ MONTH_NAMES: dict[int, str] = {
     11: "Ноябрь",
     12: "Декабрь",
 }
+
+EVENT_INLINE_IMAGE_WIDTH = 150

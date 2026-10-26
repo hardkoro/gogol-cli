@@ -103,12 +103,13 @@ def _get_paragraphs(tree: ET.ElementTree[ET.Element]) -> list[str]:
     return result
 
 
-def _extract_image(zf: zipfile.ZipFile) -> tuple[bytes, str] | None:
-    """Return (bytes, filename) for the first image found in a docx zip."""
-    for name in zf.namelist():
-        if name.startswith("word/media/"):
-            return zf.read(name), os.path.basename(name)
-    return None
+def _extract_images(zf: zipfile.ZipFile) -> list[tuple[bytes, str]]:
+    """Return (bytes, filename) for every image embedded in a docx zip (logos etc.)."""
+    return [
+        (zf.read(name), os.path.basename(name))
+        for name in sorted(zf.namelist())
+        if name.startswith("word/media/") and not name.endswith("/")
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -437,7 +438,7 @@ def parse_event_file(file_path: str) -> ParsedEvent:
     with zipfile.ZipFile(file_path) as zf:
         with zf.open("word/document.xml") as f:
             tree = ET.parse(f)
-        img_result = _extract_image(zf)
+        inline_images = _extract_images(zf)
 
     paragraphs = _get_paragraphs(tree)
     if not paragraphs:
@@ -455,8 +456,6 @@ def parse_event_file(file_path: str) -> ParsedEvent:
     tail_text = " ".join(p for p in paragraphs[description_end_idx:] if p)
     final_address = _resolve_final_address(address, description_html, tail_text)
 
-    image_data, image_filename = img_result if img_result else (None, None)
-
     return ParsedEvent(
         name=name,
         date_times=date_times,
@@ -467,6 +466,7 @@ def parse_event_file(file_path: str) -> ParsedEvent:
         tags=_build_default_tags(name, price),
         address=final_address,
         is_active=True,
-        image_data=image_data,
-        image_filename=image_filename,
+        image_data=None,
+        image_filename=None,
+        inline_images=inline_images,
     )

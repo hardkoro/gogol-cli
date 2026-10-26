@@ -552,6 +552,7 @@ class GogolCLIService:
         event_data: EventData,
         image_data: bytes | None = None,
         image_filename: str | None = None,
+        inline_images: list[tuple[bytes, str]] | None = None,
     ) -> None:
         """Create a completely new event in the database.
 
@@ -559,6 +560,7 @@ class GogolCLIService:
             event_data: Event metadata (name, date, description, etc).
             image_data: Optional image binary data.
             image_filename: Optional image file name.
+            inline_images: Optional (data, filename) logos appended to the description.
         """
         name = event_data["name"]
         event_date_time = event_data["event_date_time"]
@@ -604,6 +606,9 @@ class GogolCLIService:
                     len(image_data),
                 )
                 detail_picture_id = preview_picture_id
+
+            if inline_images:
+                description_html += await self._build_inline_images_html(session, inline_images)
 
             # Create preview text (first paragraph of description)
             preview_text = description_html
@@ -703,6 +708,29 @@ class GogolCLIService:
             event_time_str.replace("-", ":"),
             new_event_id,
         )
+
+    async def _build_inline_images_html(
+        self, session: AsyncSession, images: list[tuple[bytes, str]]
+    ) -> str:
+        """Upload *images* and return an HTML paragraph embedding them at a fixed width."""
+        tags: list[str] = []
+        for data, filename in images:
+            subdir = self._db.generate_new_subdir()
+            if not self._dry_run:
+                if self._ssh is None:
+                    raise SSHNotConfiguredError(
+                        "An SSH file manager is required to upload images but was not provided."
+                    )
+                await self._ssh.upload_file(data, subdir, filename)
+            with Image.open(io.BytesIO(data)) as img:
+                width, height = img.width, img.height
+            await self._db.insert_new_file_with_subdir(
+                session, subdir, filename, len(data), height, width
+            )
+            tags.append(
+                f'<img src="/upload/{subdir}/{filename}" width="{const.EVENT_INLINE_IMAGE_WIDTH}">'
+            )
+        return f"\n<p>{' '.join(tags)}</p>"
 
     @staticmethod
     def _infer_new_event_properties(

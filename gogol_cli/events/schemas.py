@@ -21,3 +21,5 @@ class ParsedEvent(BaseModel):
     is_active: bool = True  # Whether event should be active
     image_data: bytes | None
     image_filename: str | None
+    # Images embedded in the docx (e.g. logos); appended to the description, not used as main image
+    inline_images: list[tuple[bytes, str]] = []
