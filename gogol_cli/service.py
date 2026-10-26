@@ -1174,8 +1174,12 @@ class GogolCLIService:
     async def create_virtual_exhibition(
         self,
         parsed: ParsedVirtualExhibition,
-    ) -> None:
-        """Create a virtual exhibition and upload its images via SSH."""
+    ) -> str:
+        """Create a virtual exhibition and upload its images via SSH.
+
+        Returns:
+            The public URL of the newly created exhibition.
+        """
         LOGGER.info("Creating virtual exhibition '%s' ...", parsed.title)
 
         async with self._db.session() as session:
@@ -1258,12 +1262,15 @@ class GogolCLIService:
             if not self._dry_run:
                 await session.commit()
 
+        exhibition_url = const.VIRTUAL_EXHIBITION_URL_TEMPLATE.format(id=exhibition_id)
         LOGGER.info(
-            "Finished creating virtual exhibition '%s' (id=%d, items=%d)",
+            "Finished creating virtual exhibition '%s' (id=%d, items=%d) — %s",
             parsed.title,
             exhibition_id,
             len(parsed.items),
+            exhibition_url,
         )
+        return exhibition_url
 
     @_with_db_retry
     async def add_art_exhibition(

@@ -152,7 +152,8 @@ async def create_virtual_exhibition(
     ssh_file_manager = SSHFileManager(ssh_config)
     cli_service = GogolCLIService(database_client, ssh_file_manager, dry_run)
 
-    await cli_service.create_virtual_exhibition(parsed)
+    exhibition_url = await cli_service.create_virtual_exhibition(parsed)
+    typer.echo(f"\n✓ Created virtual exhibition «{parsed.title}» — {exhibition_url}")
 
 
 def _collect_docx_files(folder_path: str) -> list[str]:
