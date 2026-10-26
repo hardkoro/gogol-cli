@@ -27,6 +27,7 @@ _W_NSMAP = {"w": _W_NS}
 
 _KP_RE = re.compile(r"КП[-\s]+(\d+)", re.IGNORECASE)
 _BIB_INDEX_RE = re.compile(r"^[А-ЯЁA-Z]{1,3}-\d+\s*$")
+_INDEX_LINE_RE = re.compile(r"^\d+\s*$")
 _DATE_DD_MM_YYYY = re.compile(r"\b(\d{1,2})\.(\d{2})\.(\d{4})\b")
 _DATE_DD_MM_DOT = re.compile(r"\b(\d{1,2})\.(\d{2})\.(?=\s*[-\u2013\u2014]|\s*$)")
 
@@ -296,43 +297,40 @@ def _looks_like_item_name(text: str) -> bool:
 
 def _split_pending(
     pending: list[str],
-) -> tuple[list[str], list[str]]:
-    """Split a buffer of non-bib lines into (pre_lines, name_lines).
+) -> tuple[list[str], list[str], list[str]]:
+    """Split a buffer of non-bib lines into (pre_lines, name_lines, post_lines).
 
-    Scans backward from the end of *pending*: consecutive lines that look like
-    item names are peeled off as *name_lines*; the rest become *pre_lines*
-    (body paragraphs or description continuation).
+    Exhibition documents number each item with a standalone digit paragraph
+    (e.g. '9', '10') immediately followed by its name. When such a marker is
+    present, *pre_lines* is everything before it (description continuation
+    from the previous item), *name_lines* is the marker plus the name-like
+    lines directly following it, and *post_lines* is anything after that
+    stops looking like a name (e.g. a long series/collection line) — routed
+    to the new item's description rather than glued onto its name. Falls
+    back to peeling trailing name-like lines from the end when no marker is
+    found.
     """
+    for d, line in enumerate(pending):
+        if _INDEX_LINE_RE.match(line.strip()):
+            j = d + 1
+            while j < len(pending) and _looks_like_item_name(pending[j]):
+                j += 1
+            return pending[:d], pending[d:j], pending[j:]
+
     i = len(pending)
     while i > 0 and _looks_like_item_name(pending[i - 1]):
         i -= 1
-    return pending[:i], pending[i:]
-
-
-def _trim_name_lines(
-    name_lines: list[str],
-) -> tuple[list[str], list[str]]:
-    """Return (spillover, trimmed) by discarding lines before the item-number line.
-
-    Exhibition documents number each item with a standalone digit paragraph
-    (e.g. '9', '10').  Any lines preceding that digit in *name_lines* are
-    description text that spilled over from the previous item (short Gogol
-    quotes, chapter references like '(Т. I, Гл. 2)', etc.).
-    """
-    for i, line in enumerate(name_lines):
-        if re.match(r"^\d+\s*$", line.strip()):
-            return name_lines[:i], name_lines[i:]
-    return [], name_lines
+    return pending[:i], pending[i:], []
 
 
 def _split_pending_kp(
     pending: list[str],
-) -> tuple[list[str], list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str], list[str]]:
     """Split pending when a КП line (not an origin line) triggers a new item.
 
-    Returns (pre_lines, bib_pre_lines, name_lines):
+    Returns (pre_lines, bib_pre_lines, name_lines, post_lines):
     - bib_pre_lines: material/technique lines at the tail (before the КП trigger)
-    - name_lines: name-like lines just before the bib_pre_lines
+    - name_lines / post_lines: see _split_pending
     - pre_lines: everything else → previous item description or body
 
     Unlike _split_pending, this also peels off material lines that precede the
@@ -344,11 +342,9 @@ def _split_pending_kp(
         i -= 1
     bib_pre = pending[i:]
 
-    # Step 2: peel off name lines just before the material section.
-    j = i
-    while j > 0 and _looks_like_item_name(pending[j - 1]):
-        j -= 1
-    return pending[:j], bib_pre, pending[j:i]
+    # Step 2: split the remainder the same way _split_pending does.
+    pre, name_lines, post = _split_pending(pending[:i])
+    return pre, bib_pre, name_lines, post
 
 
 def _parse_document(  # noqa: PLR0912, PLR0915
@@ -413,6 +409,7 @@ def _parse_document(  # noqa: PLR0912, PLR0915
     current: _RawItem | None = None
     in_bib = False
     pending: list[str] = []
+    expect_name_line = False
 
     while idx < len(clean):
         text = clean[idx]
@@ -421,20 +418,30 @@ def _parse_document(  # noqa: PLR0912, PLR0915
         if _is_item_terminator(text):
             break
 
+        if expect_name_line:
+            # The line right after a standalone item-index paragraph is always
+            # the item's name, even if it incidentally looks like a bib/origin
+            # line (e.g. a name that happens to end in a year).
+            expect_name_line = False
+            if current is not None and in_bib:
+                in_bib = False
+            pending.append(text)
+            continue
+
         if _is_bib_origin(text):
             # --- Start of a new item's bib section (origin line trigger) ---
-            pre, name_lines = _split_pending(pending)
-            spill, name_lines = _trim_name_lines(name_lines)
+            pre, name_lines, post = _split_pending(pending)
             pending = []
 
             if current is None:
-                body.extend(pre + spill)
+                body.extend(pre)
             else:
-                current.desc_lines.extend(pre + spill)
+                current.desc_lines.extend(pre)
 
             current = _RawItem()
             raw_items.append(current)
             current.name_lines = name_lines
+            current.desc_lines.extend(post)
 
             kp = _extract_kp_doc_key(text)
             if kp is not None:
@@ -444,18 +451,18 @@ def _parse_document(  # noqa: PLR0912, PLR0915
 
         elif bool(_KP_RE.search(text)) and not in_bib:
             # --- КП line outside a bib section: item without an origin line ---
-            pre, bib_pre, name_lines = _split_pending_kp(pending)
-            spill, name_lines = _trim_name_lines(name_lines)
+            pre, bib_pre, name_lines, post = _split_pending_kp(pending)
             pending = []
 
             if current is None:
-                body.extend(pre + spill)
+                body.extend(pre)
             else:
-                current.desc_lines.extend(pre + spill)
+                current.desc_lines.extend(pre)
 
             current = _RawItem()
             raw_items.append(current)
             current.name_lines = name_lines
+            current.desc_lines.extend(post)
             current.bib_lines.extend(bib_pre)
 
             kp = _extract_kp_doc_key(text)
@@ -481,6 +488,8 @@ def _parse_document(  # noqa: PLR0912, PLR0915
                 # Bib section just ended – begin buffering desc / next-item name
                 in_bib = False
             pending.append(text)
+            if _INDEX_LINE_RE.match(text.strip()):
+                expect_name_line = True
 
     # Flush remaining pending to last item's description (or body)
     if pending:
