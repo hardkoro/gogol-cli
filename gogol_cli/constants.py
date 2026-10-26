@@ -132,6 +132,21 @@ VIRTUAL_EXHIBITION_PROP_CATEGORY_VALUE = 120  # value_enum for prop 213
 # Image resizing
 VIRTUAL_EXHIBITION_MAX_IMAGE_DIM = 1280
 
+# --- Art exhibition (shares iblock 5 with virtual exhibitions) -------------------
+
+ART_EXHIBITION_SECTION_ID = 5  # Художественные выставки
+
+ART_EXHIBITION_PROP_TYPE_ID = 9
+ART_EXHIBITION_PROP_TYPE_VALUE = 5  # Художественная
+ART_EXHIBITION_PROP_ACTIVE_FROM_ID = 54
+ART_EXHIBITION_PROP_ACTIVE_TO_ID = 55
+ART_EXHIBITION_PROP_SORT_ID = 66
+ART_EXHIBITION_PROP_LOCATION_ID = 121
+ART_EXHIBITION_PROP_LOCATION_VALUE = 78  # Выставочный зал
+ART_EXHIBITION_GALLERY_PROPERTY_ID = 11  # "Галерея" (MORE_PHOTO), multiple file property
+
+ART_EXHIBITION_MAX_IMAGE_DIM = 1280
+
 # --- News iblock -----------------------------------------------------------------
 
 NEWS_IBLOCK_ID = 1

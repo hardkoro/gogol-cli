@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from gogol_cli.exporters.smtp import EmailConfig, SMTPConfig
 from gogol_cli.runner import copy_chronograph as run_chronograph
 from gogol_cli.runner import copy_event as run_copy_event
+from gogol_cli.runner import add_art_exhibition as run_add_art_exhibition
 from gogol_cli.runner import add_books as run_add_books
 from gogol_cli.runner import add_news as run_add_news
 from gogol_cli.runner import create_exhibition as run_create_exhibition
@@ -249,6 +250,30 @@ def virtual(
         base_path=ssh_base_path,
     )
     asyncio.run(run_create_virtual_exhibition(database_uri, folder, dry_run, ssh_config))
+
+
+@app.command()
+def art(
+    database_uri: Annotated[str, typer.Option(help="Database URI", envvar="DATABASE_URI")],
+    ssh_host: Annotated[str, typer.Option(help="SSH host", envvar="SSH_HOST")],
+    ssh_username: Annotated[str, typer.Option(help="SSH username", envvar="SSH_USERNAME")],
+    ssh_key_path: Annotated[str, typer.Option(help="SSH key path", envvar="SSH_KEY_PATH")],
+    ssh_base_path: Annotated[str, typer.Option(help="SSH base path", envvar="SSH_BASE_PATH")],
+    folder: Annotated[
+        str,
+        typer.Argument(help="Folder containing a .doc/.docx file and exhibition images"),
+    ],
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
+) -> None:
+    """Add an art exhibition from a folder containing a .doc/.docx file and images."""
+    uvloop.install()
+    ssh_config = SSHConfig(
+        host=ssh_host,
+        username=ssh_username,
+        key_path=ssh_key_path,
+        base_path=ssh_base_path,
+    )
+    asyncio.run(run_add_art_exhibition(database_uri, folder, dry_run, ssh_config))
 
 
 @app.command()

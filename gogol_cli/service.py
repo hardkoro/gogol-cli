@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gogol_cli import constants as const
 from gogol_cli.clients import DatabaseClient
 from gogol_cli.exceptions import GogolCLIException, SSHNotConfiguredError
+from gogol_cli.art_exhibition.schemas import ParsedArtExhibition
 from gogol_cli.books.schemas import ParsedBookEntry
 from gogol_cli.exhibition.schemas import ParsedExhibition
 from gogol_cli.news.schemas import ParsedNews
@@ -1116,7 +1117,9 @@ class GogolCLIService:
             # queries in quick succession.
             gallery_file_ids = await self._db.insert_new_files_batch(session, uploaded_gallery)
             if gallery_file_ids:
-                await self._db.insert_news_gallery_images(session, news_id, gallery_file_ids)
+                await self._db.insert_gallery_images(
+                    session, const.NEWS_GALLERY_PROPERTY_ID, news_id, gallery_file_ids
+                )
 
             if not self._dry_run:
                 await session.commit()
@@ -1218,6 +1221,89 @@ class GogolCLIService:
             exhibition_id,
             len(parsed.items),
         )
+
+    @_with_db_retry
+    async def add_art_exhibition(
+        self,
+        parsed: ParsedArtExhibition,
+        preview_image: tuple[bytes, str],
+        detail_image: tuple[bytes, str],
+        gallery_images: list[tuple[bytes, str]],
+        exhibit_from: datetime,
+        exhibit_to: datetime,
+    ) -> int:
+        """Add an art exhibition with a preview picture, a detail picture, and a gallery.
+
+        Args:
+            parsed: The parsed (and interactively confirmed) exhibition title/text.
+            preview_image: (bytes, filename) for the element's preview picture.
+            detail_image: (bytes, filename) for the element's detail picture.
+            gallery_images: Additional (bytes, filename) pairs for the "Галерея" property.
+            exhibit_from: The exhibition's opening date, shown on the page.
+            exhibit_to: The exhibition's closing date, shown on the page.
+
+        Returns:
+            The ID of the newly created art exhibition element.
+        """
+        LOGGER.info("Adding art exhibition '%s' ...", parsed.title)
+
+        if not self._dry_run and self._ssh is None:
+            raise SSHNotConfiguredError(
+                "An SSH file manager is required to upload images but was not provided."
+            )
+        ssh = self._ssh
+
+        # Resize and upload every image *before* opening a DB session (see add_news for why).
+        async def _upload(data: bytes, filename: str) -> tuple[str, str, str, int, int, int]:
+            resized, w, h = _resize_image(data, const.ART_EXHIBITION_MAX_IMAGE_DIM)
+            subdir = self._db.generate_new_subdir()
+            if not self._dry_run:
+                assert ssh is not None
+                await ssh.upload_file(resized, subdir, filename)
+            return subdir, filename, _content_type(filename), w, h, len(resized)
+
+        preview_upload = await _upload(*preview_image)
+        detail_upload = await _upload(*detail_image)
+        gallery_uploads = [await _upload(data, filename) for data, filename in gallery_images]
+
+        async with self._db.session() as session:
+            preview_file_id, detail_file_id = await self._db.insert_new_files_batch(
+                session, [preview_upload, detail_upload]
+            )
+
+            element_active_from = datetime.today()
+            element_active_to = exhibit_to + timedelta(days=1)
+            exhibition_id = await self._db.insert_art_exhibition_element(
+                session,
+                title=parsed.title,
+                preview_text=parsed.preview_text,
+                detail_text=parsed.detail_text,
+                preview_picture_id=preview_file_id,
+                detail_picture_id=detail_file_id,
+                active_from=element_active_from,
+                active_to=element_active_to,
+            )
+            await self._db.set_art_exhibition_properties(
+                session,
+                element_id=exhibition_id,
+                exhibit_from=exhibit_from,
+                exhibit_to=exhibit_to,
+            )
+
+            gallery_file_ids = await self._db.insert_new_files_batch(session, gallery_uploads)
+            if gallery_file_ids:
+                await self._db.insert_gallery_images(
+                    session,
+                    const.ART_EXHIBITION_GALLERY_PROPERTY_ID,
+                    exhibition_id,
+                    gallery_file_ids,
+                )
+
+            if not self._dry_run:
+                await session.commit()
+
+        LOGGER.info("Finished adding art exhibition '%s' (id=%d)", parsed.title, exhibition_id)
+        return exhibition_id
 
 
 def _content_type(filename: str) -> str:

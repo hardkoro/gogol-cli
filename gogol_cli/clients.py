@@ -1405,12 +1405,13 @@ class DatabaseClient:
         return list(range(first_id, first_id + len(files)))
 
     @staticmethod
-    async def insert_news_gallery_images(
+    async def insert_gallery_images(
         session: AsyncSession,
+        prop_id: int,
         element_id: int,
         file_ids: list[int],
     ) -> None:
-        """Add file IDs to a news element's "Галерея" (MORE_PHOTO) gallery property."""
+        """Add file IDs to an element's "Галерея" (MORE_PHOTO) gallery property."""
         if not file_ids:
             return
 
@@ -1419,7 +1420,7 @@ class DatabaseClient:
             for i in range(len(file_ids))
         )
         params: dict[str, object] = {
-            "prop_id": const.NEWS_GALLERY_PROPERTY_ID,
+            "prop_id": prop_id,
             "element_id": element_id,
         }
         for i, file_id in enumerate(file_ids):
@@ -1433,6 +1434,104 @@ class DatabaseClient:
                 VALUES {rows_sql}
             """),
             params,
+        )
+
+    @staticmethod
+    async def insert_art_exhibition_element(
+        session: AsyncSession,
+        title: str,
+        preview_text: str,
+        detail_text: str,
+        preview_picture_id: int,
+        detail_picture_id: int,
+        active_from: datetime,
+        active_to: datetime,
+    ) -> int:
+        """Insert a new art exhibition element in iblock 5, section 5 (Художественные выставки)."""
+        active_from_str = active_from.strftime(const.DATETIME_FORMAT)
+        active_to_str = active_to.strftime(const.DATETIME_FORMAT)
+        await session.execute(
+            text("""
+                INSERT INTO b_iblock_element (
+                    timestamp_x, modified_by, date_create, created_by,
+                    iblock_id, iblock_section_id, active, active_from, active_to,
+                    sort, name, preview_picture, preview_text, preview_text_type,
+                    detail_picture, detail_text, detail_text_type,
+                    searchable_content, tmp_id
+                ) VALUES (
+                    NOW(), :user, NOW(), :user,
+                    :iblock_id, :section_id, 'Y', :active_from, :active_to,
+                    :sort, :name, :preview_picture, :preview_text, 'html',
+                    :detail_picture, :detail_text, 'html',
+                    :searchable_content, 0
+                )
+            """),
+            {
+                "user": const.DEFAULT_USER_ID,
+                "iblock_id": const.VIRTUAL_EXHIBITION_IBLOCK_ID,
+                "section_id": const.ART_EXHIBITION_SECTION_ID,
+                "active_from": active_from_str,
+                "active_to": active_to_str,
+                "sort": const.VIRTUAL_EXHIBITION_DEFAULT_SORT,
+                "name": title,
+                "preview_picture": preview_picture_id,
+                "preview_text": preview_text,
+                "detail_picture": detail_picture_id,
+                "detail_text": detail_text,
+                "searchable_content": title.upper(),
+            },
+        )
+        element_id = await DatabaseClient._get_last_insert_id(session)
+        await session.execute(
+            text("UPDATE b_iblock_element SET xml_id = :id WHERE id = :id"),
+            {"id": element_id},
+        )
+        await DatabaseClient.add_element_to_section(
+            session, element_id, const.ART_EXHIBITION_SECTION_ID
+        )
+        return element_id
+
+    @staticmethod
+    async def set_art_exhibition_properties(
+        session: AsyncSession,
+        element_id: int,
+        exhibit_from: datetime,
+        exhibit_to: datetime,
+    ) -> None:
+        """Set the fixed type/location properties and exhibit dates on an art exhibition."""
+        from_str = exhibit_from.strftime("%Y-%m-%d 00:00:00")
+        to_str = exhibit_to.strftime("%Y-%m-%d 00:00:00")
+        from_year = float(exhibit_from.year)
+        to_year = float(exhibit_to.year)
+
+        await session.execute(
+            text("""
+                INSERT INTO b_iblock_element_property
+                    (iblock_property_id, iblock_element_id, value,
+                     value_type, value_enum, value_num, description)
+                VALUES
+                    (:prop9,   :id, :val9,     'text', :enum9,   NULL,       NULL),
+                    (:prop54,  :id, :from_str, 'text', NULL,     :from_year, NULL),
+                    (:prop55,  :id, :to_str,   'text', NULL,     :to_year,   NULL),
+                    (:prop66,  :id, '0',       'text', NULL,     0.0,        NULL),
+                    (:prop121, :id, :val121,   'text', :enum121, NULL,       NULL)
+            """),
+            {
+                "prop9": const.ART_EXHIBITION_PROP_TYPE_ID,
+                "val9": str(const.ART_EXHIBITION_PROP_TYPE_VALUE),
+                "enum9": const.ART_EXHIBITION_PROP_TYPE_VALUE,
+                "prop54": const.ART_EXHIBITION_PROP_ACTIVE_FROM_ID,
+                "from_str": from_str,
+                "from_year": from_year,
+                "prop55": const.ART_EXHIBITION_PROP_ACTIVE_TO_ID,
+                "to_str": to_str,
+                "to_year": to_year,
+                "prop66": const.ART_EXHIBITION_PROP_SORT_ID,
+                "prop121": const.ART_EXHIBITION_PROP_LOCATION_ID,
+                "val121": str(const.ART_EXHIBITION_PROP_LOCATION_VALUE),
+                "enum121": const.ART_EXHIBITION_PROP_LOCATION_VALUE,
+                "id": element_id,
+            },
         )
 
     @staticmethod
@@ -1664,7 +1763,7 @@ class DatabaseClient:
         )
 
 
-def _build_scp_link_value(
+def _build_scp_link_value(  # noqa: PLR0913
     element_id: int,
     prop_name_id: int,
     prop_bib_id: int,

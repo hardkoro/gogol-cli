@@ -9,6 +9,7 @@ import typer
 from PIL import Image
 
 from gogol_cli import constants as const
+from gogol_cli.art_exhibition.docx_parser import parse_art_exhibition_file
 from gogol_cli.books.docx_parser import parse_books_file
 from gogol_cli.books.schemas import ParsedBookEntry
 from gogol_cli.clients import DatabaseClient
@@ -20,7 +21,7 @@ from gogol_cli.exporters import AbstractExporter, PlainExporter, SMTPExporter
 from gogol_cli.exporters.smtp import EmailConfig, SMTPConfig
 from gogol_cli.service import GogolCLIService, EventData
 from gogol_cli.ssh_file_manager import SSHConfig, SSHFileManager
-from gogol_cli.virtual_exhibition.parser import parse_virtual_exhibition_folder
+from gogol_cli.virtual_exhibition.parser import _prompt_dates, parse_virtual_exhibition_folder
 
 
 async def pin_event(
@@ -430,10 +431,94 @@ async def add_news(
     ssh_file_manager = SSHFileManager(ssh_config)
     cli_service = GogolCLIService(database_client, ssh_file_manager, dry_run)
 
-    news_id = await cli_service.add_news(
-        parsed, preview_image, gallery_images, tags, active_from
-    )
+    news_id = await cli_service.add_news(parsed, preview_image, gallery_images, tags, active_from)
     typer.echo(f"\n✓ Added news «{parsed.title}» (id={news_id}, tags={tags})")
+
+
+def _select_art_exhibition_images(
+    image_files: dict[str, str],
+) -> tuple[tuple[bytes, str], tuple[bytes, str], list[tuple[bytes, str]]]:
+    """Pick the preview and detail images out of *image_files*; the rest go to the gallery.
+
+    With a single image, it is used for both the preview and the detail picture, and
+    the gallery stays empty. With multiple images, the user picks a preview image and
+    a detail image (defaulting to the first two, alphabetically); every remaining image
+    is added to the gallery.
+    """
+    sorted_names = sorted(image_files.keys())
+
+    def _read(name: str) -> bytes:
+        with open(image_files[name], "rb") as f:
+            return f.read()
+
+    if len(sorted_names) == 1:
+        only = sorted_names[0]
+        image = (_read(only), only)
+        return image, image, []
+
+    typer.echo("\nAvailable images:")
+    for idx, name in enumerate(sorted_names, 1):
+        typer.echo(f"  {idx}. {name}")
+
+    def _prompt_choice(label: str, default_idx: int) -> str:
+        while True:
+            choice = typer.prompt(f"Select {label} image (number)", default=str(default_idx))
+            if choice.isdigit() and 1 <= int(choice) <= len(sorted_names):
+                return sorted_names[int(choice) - 1]
+            typer.echo("  Invalid selection, try again.")
+
+    preview_name = _prompt_choice("preview", 1)
+    detail_name = _prompt_choice("detail", 2 if len(sorted_names) > 1 else 1)
+
+    used = {preview_name, detail_name}
+    gallery_names = [n for n in sorted_names if n not in used]
+
+    return (
+        (_read(preview_name), preview_name),
+        (_read(detail_name), detail_name),
+        [(_read(n), n) for n in gallery_names],
+    )
+
+
+async def add_art_exhibition(
+    database_uri: str,
+    folder_path: str,
+    dry_run: bool,
+    ssh_config: SSHConfig,
+) -> None:
+    """Parse a folder's .doc/.docx and images and add an art exhibition."""
+    all_docx = [
+        f
+        for f in os.listdir(folder_path)
+        if f.lower().endswith((".doc", ".docx")) and not f.startswith("~$")
+    ]
+    if not all_docx:
+        typer.echo(f"No .doc/.docx files found in {folder_path}")
+        return
+    if len(all_docx) > 1:
+        typer.echo(f"Multiple doc files found; using: {sorted(all_docx)[0]}")
+    docx_path = os.path.join(folder_path, sorted(all_docx)[0])
+
+    parsed = parse_art_exhibition_file(docx_path)
+
+    image_files = _collect_image_files(folder_path)
+    if not image_files:
+        typer.echo(f"No images found in {folder_path}")
+        return
+
+    preview_image, detail_image, gallery_images = _select_art_exhibition_images(image_files)
+
+    typer.echo("\nExhibition dates (shown on the exhibition page):")
+    exhibit_from, exhibit_to = _prompt_dates(parsed.exhibit_from, parsed.exhibit_to)
+
+    database_client = DatabaseClient(database_uri)
+    ssh_file_manager = SSHFileManager(ssh_config)
+    cli_service = GogolCLIService(database_client, ssh_file_manager, dry_run)
+
+    exhibition_id = await cli_service.add_art_exhibition(
+        parsed, preview_image, detail_image, gallery_images, exhibit_from, exhibit_to
+    )
+    typer.echo(f"\n✓ Added art exhibition «{parsed.title}» (id={exhibition_id})")
 
 
 async def add_events(
@@ -488,8 +573,8 @@ def resize_images(folder_path: str, dry_run: bool) -> None:
         # name the same file even though the Path strings differ.
         same_file = dest_path.exists() and os.path.samefile(src_path, dest_path)
 
-        with Image.open(src_path) as img:
-            img = img.convert("RGB")
+        with Image.open(src_path) as src_img:
+            img = src_img.convert("RGB")
             w, h = img.size
             scale = max_dim / max(w, h)
             new_w, new_h = max(1, round(w * scale)), max(1, round(h * scale))
