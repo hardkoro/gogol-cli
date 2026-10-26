@@ -5,10 +5,12 @@ import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from itertools import count
-from typing import TypedDict
+from typing import Any, TypedDict, cast
 from uuid import uuid4
 
-from sqlalchemy import text
+import aiomysql
+from pymysql.constants import CLIENT
+from sqlalchemy import CursorResult, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gogol_cli import constants as const
@@ -25,11 +27,39 @@ def _strip_html(s: str | None) -> str:
 # Matches Bitrix's default transliteration table (CUtil::translit), used to build
 # the news element CODE that its detail page URL (#ELEMENT_CODE#) depends on.
 _TRANSLIT_TABLE = {
-    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
-    "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
-    "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
-    "ф": "f", "х": "kh", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "shch",
-    "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya",
+    "а": "a",
+    "б": "b",
+    "в": "v",
+    "г": "g",
+    "д": "d",
+    "е": "e",
+    "ё": "e",
+    "ж": "zh",
+    "з": "z",
+    "и": "i",
+    "й": "y",
+    "к": "k",
+    "л": "l",
+    "м": "m",
+    "н": "n",
+    "о": "o",
+    "п": "p",
+    "р": "r",
+    "с": "s",
+    "т": "t",
+    "у": "u",
+    "ф": "f",
+    "х": "kh",
+    "ц": "ts",
+    "ч": "ch",
+    "ш": "sh",
+    "щ": "shch",
+    "ъ": "",
+    "ы": "y",
+    "ь": "",
+    "э": "e",
+    "ю": "yu",
+    "я": "ya",
 }
 
 
@@ -52,6 +82,20 @@ def _slugify_title(title: str) -> str:
     """Build a Bitrix-style element CODE from *title* (transliterate, strip non-alnum)."""
     transliterated = _transliterate(title)
     return re.sub(r"[^0-9A-Za-z]", "", transliterated)
+
+
+async def _connect_without_found_rows(**kwargs: Any) -> aiomysql.Connection:
+    """Open an aiomysql connection, dropping the CLIENT_FOUND_ROWS flag.
+
+    SQLAlchemy's aiomysql dialect always sets FOUND_ROWS. With it, the DB host (reg.ru
+    shared hosting) resets the connection ("Lost connection to MySQL server during
+    query") once ~7-8 KB have been sent on it in total, whatever the statements are.
+    Without the flag the same connection sends 100 KB+ fine. The only effect of
+    dropping it is that UPDATE's rowcount counts changed rows instead of matched
+    rows, which nothing here relies on.
+    """
+    kwargs["client_flag"] = kwargs.get("client_flag", 0) & ~CLIENT.FOUND_ROWS
+    return await aiomysql.connect(**kwargs)
 
 
 class NewEventProperties(TypedDict):
@@ -78,10 +122,13 @@ class DatabaseClient:
         """
         # pool_pre_ping: validate a pooled connection with a cheap SELECT 1 before
         # handing it out, so a connection dropped by the (flaky, shared-hosting) MySQL
-        # server between statements gets discarded instead of being reused as-is on
-        # the next checkout — otherwise a retry can be handed back the same dead
-        # connection and fail identically every time.
-        self._engine = create_async_engine(database_uri, echo=False, pool_pre_ping=True)
+        # server between statements gets discarded instead of being reused as-is.
+        self._engine = create_async_engine(
+            database_uri,
+            echo=False,
+            pool_pre_ping=True,
+            connect_args={"async_creator_fn": _connect_without_found_rows},
+        )
         self._session_maker = async_sessionmaker(self._engine)
 
     def session(self) -> AsyncSession:
