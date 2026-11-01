@@ -900,8 +900,12 @@ class GogolCLIService:
         self,
         parsed: ParsedExhibition,
         active_from: datetime,
-    ) -> None:
-        """Create an exhibition and its books from parsed docx data."""
+    ) -> str:
+        """Create an exhibition and its books from parsed docx data.
+
+        Returns:
+            The public URL of the newly created exhibition.
+        """
         LOGGER.info("Creating exhibition '%s' ...", parsed.title)
 
         async with self._db.session() as session:
@@ -987,12 +991,15 @@ class GogolCLIService:
             if not self._dry_run:
                 await session.commit()
 
+        exhibition_url = const.EXHIBITION_URL_TEMPLATE.format(id=exhibition_id)
         LOGGER.info(
-            "Finished creating exhibition '%s' (id=%d, books=%d)",
+            "Finished creating exhibition '%s' (id=%d, books=%d) — %s",
             parsed.title,
             exhibition_id,
             len(parsed.books),
+            exhibition_url,
         )
+        return exhibition_url
 
     @_with_db_retry
     async def add_books(

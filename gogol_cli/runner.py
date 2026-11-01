@@ -136,7 +136,8 @@ async def create_exhibition(
     ssh_file_manager = SSHFileManager(ssh_config)
     cli_service = GogolCLIService(database_client, ssh_file_manager, dry_run)
 
-    await cli_service.create_exhibition(parsed, active_from)
+    exhibition_url = await cli_service.create_exhibition(parsed, active_from)
+    typer.echo(f"\n✓ Created exhibition «{parsed.title}» — {exhibition_url}")
 
 
 async def create_virtual_exhibition(
