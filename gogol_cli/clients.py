@@ -854,7 +854,11 @@ class DatabaseClient:
                 "location_prop_id": const.EVENT_LOCATION_PROPERTY_ID,
                 "type_of_activity_prop_id": const.EVENT_TYPE_OF_ACTIVITY_PROPERTY_ID,
                 "event_id": event_id,
-                "date_value": event_date.strftime(const.DATE_FORMAT),
+                # Bitrix stores date properties as midnight datetimes; the calendar's
+                # date-range filter misses a bare "YYYY-MM-DD" value on the end day.
+                "date_value": event_date.replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                ).strftime(const.DATETIME_FORMAT),
                 "time_value": event_time_str.replace("-", ":"),
                 "price_value": price,
                 "purchase_link_value": purchase_link,
