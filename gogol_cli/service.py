@@ -30,6 +30,18 @@ _RETRYABLE_MYSQL_ERROR_CODES = {2002, 2003, 2006, 2013}
 _MAX_DB_RETRIES = 5
 _DB_RETRY_DELAY_SECONDS = 3.0
 
+
+def _normalize_spaces(text: str) -> str:
+    """Collapse whitespace, including non-breaking spaces, to single spaces."""
+    return " ".join(text.split())
+
+
+# The library's own premises: an event at one of these is on-site, not offsite.
+_LIBRARY_ADDRESSES = {
+    _normalize_spaces(const.DEFAULT_ADDRESS),
+    _normalize_spaces(const.LECTURE_HALL_ADDRESS),
+}
+
 _P = ParamSpec("_P")
 _T = TypeVar("_T")
 
@@ -784,9 +796,12 @@ class GogolCLIService:
         else:
             description_buy_ticket = "Мероприятие платное"
 
-        if address_override:
+        if address_override and _normalize_spaces(address_override) not in _LIBRARY_ADDRESSES:
             address = address_override
             location_id = const.MOSCOW_LOCATION_ID
+        elif address_override:
+            address = address_override
+            location_id = const.DEFAULT_LOCATION_ID
         elif "лекторий" in combined or "новое крыло" in combined:
             address = const.LECTURE_HALL_ADDRESS
             location_id = const.DEFAULT_LOCATION_ID
