@@ -14,6 +14,7 @@ from gogol_cli.books.docx_parser import parse_books_file
 from gogol_cli.books.schemas import ParsedBookEntry
 from gogol_cli.clients import DatabaseClient
 from gogol_cli.events.docx_parser import _prompt_event_details, parse_event_file
+from gogol_cli.events.schemas import ParsedEvent
 from gogol_cli.exhibition.docx_parser import parse_exhibition_folder
 from gogol_cli.exceptions import EmailConfigError, SMTPConfigError
 from gogol_cli.news.docx_parser import parse_news_file
@@ -248,7 +249,29 @@ async def _process_single_event(
     typer.echo(f"Processing: {docx_file}")
     typer.echo(f"{'=' * 60}")
 
-    parsed_event = parse_event_file(docx_path)
+    parsed_events = parse_event_file(docx_path)
+    for number, parsed_event in enumerate(parsed_events, 1):
+        if len(parsed_events) > 1:
+            typer.echo(f"\n--- Event {number}/{len(parsed_events)} in this file ---")
+        await _create_event(
+            cli_service=cli_service,
+            parsed_event=parsed_event,
+            docx_file=docx_file,
+            image_files=image_files,
+            force_inactive=force_inactive,
+            # The docx-stem image match only makes sense for the first event of a file
+            match_stem=number == 1,
+        )
+
+
+async def _create_event(
+    cli_service: GogolCLIService,
+    parsed_event: ParsedEvent,
+    docx_file: str,
+    image_files: dict[str, str],
+    force_inactive: bool,
+    match_stem: bool,
+) -> None:
     confirmed_event = _prompt_event_details(parsed_event)
 
     if confirmed_event.image_data:
@@ -258,7 +281,7 @@ async def _process_single_event(
         matched_image_data, matched_image_filename = _pick_image_for_event(
             confirmed_event.date_times[0],
             image_files,
-            docx_stem=os.path.splitext(docx_file)[0],
+            docx_stem=os.path.splitext(docx_file)[0] if match_stem else "",
         )
         if matched_image_data is None or matched_image_filename is None:
             matched_image_data, matched_image_filename = _load_default_event_image()

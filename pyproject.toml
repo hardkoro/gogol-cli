@@ -95,3 +95,6 @@ line-ending = "auto"
 
 [tool.ruff.lint.pylint]
 max-args = 10
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

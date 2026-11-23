@@ -33,6 +33,7 @@ _RUSSIAN_MONTHS: dict[str, int] = {
 _MAX_DAY_IN_MONTH = 31
 _MAX_HOUR = 23
 _MAX_MINUTE = 59
+_MAX_DATE_LINE_LENGTH = 60
 
 # Venue-specific address mapping
 _VENUE_ADDRESSES: dict[str, str] = {
@@ -371,13 +372,48 @@ def _prompt_event_details(parsed: ParsedEvent) -> ParsedEvent:
 
 def _extract_date_times(paragraphs: list[str]) -> tuple[list[datetime], int]:
     """Parse date/times from paragraphs, returning (date_times, date_time_idx)."""
-    # Strip formatting tags: bold runs can split "23 декабря" into "<b>23</b><b> </b><b>декабря</b>"
+    # Strip tags: bold runs can split "23 декабря" into "<b>23</b><b> </b><b>декабря</b>"
     raw = _strip_html_tags(paragraphs[1]) if len(paragraphs) > 1 else ""
-    date_time = _parse_date_time(raw)
-    if date_time is None:
+    if _parse_date_time(raw) is None:
         raise ValueError(f"Could not parse date/time from: {raw or 'N/A'}")
-    date_times = _parse_multiple_date_times(raw) or [date_time]
-    return date_times, 1
+
+    # Collect every consecutive date line after the title (one line per day, or per group of days)
+    date_times: list[datetime] = []
+    last_idx = 0
+    for idx in range(1, len(paragraphs)):
+        line = _strip_html_tags(paragraphs[idx])
+        if not _is_date_line(line):
+            break
+        date_times.extend(_parse_multiple_date_times(line))
+        last_idx = idx
+    return date_times, last_idx
+
+
+def _is_date_line(line: str) -> bool:
+    """Return True for a short paragraph that is just a date/time, e.g. '5 декабря в 15:30 и 18:30'."""
+    return (
+        len(line) <= _MAX_DATE_LINE_LENGTH
+        and line[:1].isdigit()
+        and _parse_date_time(line) is not None
+    )
+
+
+def split_event_blocks(paragraphs: list[str]) -> list[list[str]]:
+    """Split paragraphs of a multi-event file into one block per event.
+
+    A new event starts at a non-date paragraph (the title) directly followed by a date line.
+    If no such title is found, the whole file is returned as a single block.
+    """
+    plain = [_strip_html_tags(p) for p in paragraphs]
+    starts = [
+        i
+        for i in range(len(paragraphs) - 1)
+        if not _is_date_line(plain[i]) and _is_date_line(plain[i + 1])
+    ]
+    if not starts or starts[0] != 0:
+        return [paragraphs]
+    ends = [*starts[1:], len(paragraphs)]
+    return [paragraphs[s:e] for s, e in zip(starts, ends, strict=True)]
 
 
 def _scan_trailing_fields(paragraphs: list[str], start_idx: int) -> tuple[str, str, str, int]:
@@ -427,24 +463,10 @@ def _resolve_final_address(address: str | None, description_html: str, tail_text
 # ---------------------------------------------------------------------------
 
 
-def parse_event_file(file_path: str) -> ParsedEvent:
-    """Parse a single event DOCX file into a ParsedEvent.
-
-    Args:
-        file_path: Path to the .docx file
-
-    Returns:
-        ParsedEvent with extracted data
-    """
-    with zipfile.ZipFile(file_path) as zf:
-        with zf.open("word/document.xml") as f:
-            tree = ET.parse(f)
-        inline_images = _extract_images(zf)
-
-    paragraphs = _get_paragraphs(tree)
-    if not paragraphs:
-        raise ValueError(f"Empty event file: {file_path}")
-
+def _parse_event_block(
+    paragraphs: list[str], inline_images: list[tuple[bytes, str]]
+) -> ParsedEvent:
+    """Parse the paragraphs of a single event into a ParsedEvent."""
     name = _strip_html_tags(paragraphs[0])
     date_times, date_time_idx = _extract_date_times(paragraphs)
     price, purchase_link, registration_link, description_end_idx = _scan_trailing_fields(
@@ -471,3 +493,24 @@ def parse_event_file(file_path: str) -> ParsedEvent:
         image_filename=None,
         inline_images=inline_images,
     )
+
+
+def parse_event_file(file_path: str) -> list[ParsedEvent]:
+    """Parse an event DOCX file into one ParsedEvent per event it contains.
+
+    Args:
+        file_path: Path to the .docx file
+
+    Returns:
+        ParsedEvents with extracted data (a single item for ordinary files)
+    """
+    with zipfile.ZipFile(file_path) as zf:
+        with zf.open("word/document.xml") as f:
+            tree = ET.parse(f)
+        inline_images = _extract_images(zf)
+
+    paragraphs = _get_paragraphs(tree)
+    if not paragraphs:
+        raise ValueError(f"Empty event file: {file_path}")
+
+    return [_parse_event_block(block, inline_images) for block in split_event_blocks(paragraphs)]
