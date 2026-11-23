@@ -196,11 +196,13 @@ def xcopy(
 @app.command()
 def exhibit(
     database_uri: Annotated[str, typer.Option(help="Database URI", envvar="DATABASE_URI")],
-    folder: Annotated[str, typer.Argument(help="Path to the folder with exhibition .docx files")],
     ssh_host: Annotated[str, typer.Option(help="SSH host", envvar="SSH_HOST")],
     ssh_username: Annotated[str, typer.Option(help="SSH username", envvar="SSH_USERNAME")],
     ssh_key_path: Annotated[str, typer.Option(help="SSH key path", envvar="SSH_KEY_PATH")],
     ssh_base_path: Annotated[str, typer.Option(help="SSH base path", envvar="SSH_BASE_PATH")],
+    folder: Annotated[
+        str, typer.Argument(help="Path to the folder with exhibition .docx files")
+    ] = const.DEFAULT_FOLDER,
     active_from_str: Annotated[
         str | None,
         typer.Option(
@@ -231,14 +233,14 @@ def exhibit(
 @app.command()
 def virtual(
     database_uri: Annotated[str, typer.Option(help="Database URI", envvar="DATABASE_URI")],
-    folder: Annotated[
-        str,
-        typer.Argument(help="Path to the folder with the exhibition .doc/.docx and images"),
-    ],
     ssh_host: Annotated[str, typer.Option(help="SSH host", envvar="SSH_HOST")],
     ssh_username: Annotated[str, typer.Option(help="SSH username", envvar="SSH_USERNAME")],
     ssh_key_path: Annotated[str, typer.Option(help="SSH key path", envvar="SSH_KEY_PATH")],
     ssh_base_path: Annotated[str, typer.Option(help="SSH base path", envvar="SSH_BASE_PATH")],
+    folder: Annotated[
+        str,
+        typer.Argument(help="Path to the folder with the exhibition .doc/.docx and images"),
+    ] = const.DEFAULT_FOLDER,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
 ) -> None:
     """Create a virtual exhibition from a folder containing a .doc/.docx file and images."""
@@ -262,7 +264,7 @@ def art(
     folder: Annotated[
         str,
         typer.Argument(help="Folder containing a .doc/.docx file and exhibition images"),
-    ],
+    ] = const.DEFAULT_FOLDER,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
 ) -> None:
     """Add an art exhibition from a folder containing a .doc/.docx file and images."""
@@ -286,7 +288,7 @@ def add(
     folder: Annotated[
         str,
         typer.Argument(help="Path to the folder with event .docx files and images"),
-    ] = ".events",
+    ] = const.DEFAULT_FOLDER,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
     inactive: Annotated[bool, typer.Option("--inactive", help="Add events as inactive")] = False,
 ) -> None:
@@ -311,7 +313,7 @@ def books(
     folder: Annotated[
         str,
         typer.Argument(help="Folder containing a joint .docx file and book cover images"),
-    ],
+    ] = const.DEFAULT_FOLDER,
     gogol: Annotated[
         bool,
         typer.Option(
@@ -346,7 +348,7 @@ def news(
     folder: Annotated[
         str,
         typer.Argument(help="Folder containing a .docx file and news images"),
-    ],
+    ] = const.DEFAULT_FOLDER,
     partners: Annotated[
         bool,
         typer.Option(
@@ -369,7 +371,9 @@ def news(
 
 @app.command()
 def resize_images(
-    folder: Annotated[str, typer.Argument(help="Path to the folder with images")],
+    folder: Annotated[
+        str, typer.Argument(help="Path to the folder with images")
+    ] = const.DEFAULT_FOLDER,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Dry run")] = False,
 ) -> None:
     """Convert images in a folder to JPG, resizing the largest side to 780px."""

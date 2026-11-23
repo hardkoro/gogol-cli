@@ -319,6 +319,14 @@ def _prompt_event_details(parsed: ParsedEvent) -> ParsedEvent:
 
     name = _strip_html_tags(typer.prompt("Name", default=parsed.name))
 
+    if len(parsed.date_times) > 1:
+        typer.echo(f"\n{len(parsed.date_times)} dates/times will be created:")
+        for date_time in parsed.date_times:
+            typer.echo(f"  {date_time.strftime('%Y-%m-%d %H:%M')}")
+        typer.echo(
+            "(Date/Time below edit the first one; the others shift along if the date changes)"
+        )
+
     date_str = parsed.date_times[0].strftime("%Y-%m-%d")
     time_str = parsed.date_times[0].strftime("%H:%M")
     date_input = typer.prompt("Date (YYYY-MM-DD)", default=date_str)

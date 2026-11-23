@@ -9,6 +9,9 @@ DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 # --- Shared defaults -------------------------------------------------------------
 
 DEFAULT_USER_ID = 1
+DEFAULT_FOLDER = (
+    "/Users/evgeniikorobkov/Downloads/New Folder With Items"  # default for every folder argument
+)
 
 # --- Local image conversion -------------------------------------------------------
 
