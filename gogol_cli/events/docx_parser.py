@@ -371,7 +371,8 @@ def _prompt_event_details(parsed: ParsedEvent) -> ParsedEvent:
 
 def _extract_date_times(paragraphs: list[str]) -> tuple[list[datetime], int]:
     """Parse date/times from paragraphs, returning (date_times, date_time_idx)."""
-    raw = paragraphs[1] if len(paragraphs) > 1 else ""
+    # Strip formatting tags: bold runs can split "23 декабря" into "<b>23</b><b> </b><b>декабря</b>"
+    raw = _strip_html_tags(paragraphs[1]) if len(paragraphs) > 1 else ""
     date_time = _parse_date_time(raw)
     if date_time is None:
         raise ValueError(f"Could not parse date/time from: {raw or 'N/A'}")
